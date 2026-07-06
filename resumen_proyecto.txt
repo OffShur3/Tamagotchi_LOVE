@@ -1,0 +1,251 @@
+This file is a merged representation of the entire codebase, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of the entire repository's contents.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+src/
+  lv_conf.h
+  main.cpp
+  touch_axs5106.h
+platformio.ini
+shell.nix
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="src/lv_conf.h">
+/**
+ * @file lv_conf.h
+ * Configuración básica de LVGL para Waveshare ESP32-S3 LCD 1.47"
+ */
+
+#ifndef LV_CONF_H
+#define LV_CONF_H
+
+// Habilitar esta configuración (debe ser 1)
+#define LV_CONF_SUPPRESS_DEFINE_CHECK 1
+
+/*====================
+   COLOR SETTINGS
+ *====================*/
+#define LV_COLOR_DEPTH     16
+#define LV_COLOR_16_SWAP   0      // 0 si los colores se ven bien, si están cambiados probá con 1
+#define LV_COLOR_SCREEN_TRANSP   1
+
+/*====================
+   DISPLAY SETTINGS
+ *====================*/
+#define LV_HOR_RES_MAX     172
+#define LV_VER_RES_MAX     320
+
+/*====================
+   MEMORY SETTINGS
+ *====================*/
+#define LV_MEM_SIZE        (48U * 1024U)   // 48 kB, suficiente para la UI del mockup
+#define LV_MEMCPY_MEMCPY   1                // Usa la función memcpy estándar
+
+/*====================
+   TICK SETTINGS
+ *====================*/
+#define LV_TICK_CUSTOM     0                // Usaremos lv_tick_inc() manualmente en el loop
+// Si quisieras tick automático con Arduino millis():
+// #define LV_TICK_CUSTOM     1
+// #define LV_TICK_CUSTOM_INCLUDE "Arduino.h"
+// #define LV_TICK_CUSTOM_SYS_TIME_EXPR (millis())
+
+/*====================
+   FONT USAGE
+ *====================*/
+#define LV_FONT_DEFAULT    &lv_font_montserrat_14  // Tamaño por defecto
+#define LV_FONT_FMT_TXT_CMAP 0
+
+/*====================
+   DEBUG
+ *====================*/
+#define LV_USE_DEBUG       0
+
+/*====================
+   OTHERS
+ *====================*/
+#define LV_USE_LOG         0
+#define LV_USE_ASSERT_NULL     0
+#define LV_USE_ASSERT_MALLOC   0
+#define LV_USE_PERF_MONITOR    0
+
+#endif /* LV_CONF_H */
+</file>
+
+<file path="src/main.cpp">
+#include <TFT_eSPI.h>
+TFT_eSPI tft;
+
+void setup() {
+  // Backlight
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
+
+  // Reset manual (por si acaso)
+  pinMode(TFT_RST, OUTPUT);
+  digitalWrite(TFT_RST, LOW);
+  delay(10);
+  digitalWrite(TFT_RST, HIGH);
+  delay(120);
+
+  tft.init();
+  tft.invertDisplay(false);   // Forzamos que NO esté invertida (por si la macro falla)
+  tft.setRotation(0);
+
+  // Ahora estos colores deberían verse correctos:
+  tft.fillScreen(TFT_BLACK);      // Debe verse NEGRO
+  tft.drawLine(0, 0, 171, 319, TFT_WHITE);  // Línea BLANCA
+  tft.drawCircle(86, 160, 50, TFT_RED);     // Círculo ROJO
+}
+
+void loop() {}
+</file>
+
+<file path="src/touch_axs5106.h">
+#ifndef TOUCH_AXS5106_H
+#define TOUCH_AXS5106_H
+
+#include <Arduino.h>
+#include <Wire.h>
+
+#define AXS5106_ADDR       0x5D
+#define AXS5106_XY_REG     0x00
+#define AXS5106_STATUS_REG 0x02
+
+static bool touch_init() {
+    // Pines según esquemático: SDA=42, SCL=41
+    Wire.begin(42, 41);  
+    
+    // Pin de Reset táctil: GPIO 47
+    pinMode(47, OUTPUT);
+    digitalWrite(47, LOW);
+    delay(20);
+    digitalWrite(47, HIGH);
+    delay(100);
+    return true;
+}
+
+static bool touch_is_pressed() {
+    // ---- PARCHE DE DEPURACIÓN: Ignorar el táctil temporalmente ----
+    return false; 
+    
+    // Todo lo de abajo no se ejecutará por ahora
+    Wire.beginTransmission(AXS5106_ADDR);
+    Wire.write(AXS5106_STATUS_REG);
+    if (Wire.endTransmission(false) != 0) return false;
+    Wire.requestFrom(AXS5106_ADDR, 1);
+    if (Wire.available()) {
+        uint8_t status = Wire.read();
+        return (status & 0x01);
+    }
+    return false;
+}
+
+static void touch_get_xy(uint16_t *x, uint16_t *y) {
+    uint8_t buf[4] = {0};
+    Wire.beginTransmission(AXS5106_ADDR);
+    Wire.write(AXS5106_XY_REG);
+    Wire.endTransmission(false);
+    Wire.requestFrom(AXS5106_ADDR, 4);
+    for (int i = 0; i < 4; i++) {
+        if (Wire.available()) buf[i] = Wire.read();
+    }
+    *x = ((buf[0] & 0x0F) << 8) | buf[1];
+    *y = ((buf[2] & 0x0F) << 8) | buf[3];
+    // Descomenta y ajusta si necesitas rotar las coordenadas:
+    // uint16_t raw_x = *x, raw_y = *y;
+    // *x = raw_y;
+    // *y = 320 - raw_x;
+}
+
+#endif
+</file>
+
+<file path="platformio.ini">
+[env:esp32-s3-touch-lcd-1_47]
+platform = espressif32
+board = esp32-s3-devkitc-1
+framework = arduino
+board_build.flash_mode = dio
+monitor_speed = 115200
+upload_speed = 921600
+
+lib_deps =
+    bodmer/TFT_eSPI @ ^2.5.43
+    greiman/SdFat @ ^2.2.3
+    bitbank2/PNGdec @ ^1.0.2
+
+build_flags =
+    -D USER_SETUP_LOADED=1
+    ; ---------- Pantalla en SPI2 (HSPI) ----------
+    -D ST7789_DRIVER
+    -D TFT_WIDTH=172
+    -D TFT_HEIGHT=320
+    -D USE_HSPI_PORT=1
+    -D TFT_MISO=-1
+    -D TFT_MOSI=39
+    -D TFT_SCLK=38
+    -D TFT_CS=21
+    -D TFT_DC=45
+    -D TFT_RST=40
+    -D TFT_BL=46
+    -D TFT_BACKLIGHT_ON=HIGH
+    -D TFT_ROTATION=0
+    -D TFT_RGB_ORDER=TFT_BGR
+    -D TFT_INVERSION_ON
+    -D SPI_FREQUENCY=40000000
+    -D TOUCH_CS=-1
+</file>
+
+<file path="shell.nix">
+{ pkgs ? import <nixpkgs> {} }:
+pkgs.mkShell {
+  buildInputs = [ pkgs.platformio ];
+  SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  REQUESTS_CA_BUNDLE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  GIT_SSL_CAINFO = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";  # ← nueva línea
+}
+</file>
+
+</files>

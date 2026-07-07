@@ -1,34 +1,34 @@
+// Tamagotchi-LOVE
+
+// Librerias
 #include <Arduino.h>
 #include <Arduino_GFX_Library.h>
-#include "touch_axs5106.h"
 #include <FS.h>
-#include "colors.h"
 #include <SD_MMC.h>
 #include <PNGdec.h>
+#include "NetworkManager.h"
 
-// ============ PINOUT ============
+// Archivos
+#include "touch_axs5106.h"
+#include "colors.h"
+#include "UI.h"
+
+int pngOffsetX = 0;
+int pngOffsetY = 0;
+
 #define TFT_BL 46
-
-#define BGR_RED    0x001F
-#define BGR_GREEN  0x07E0
-#define BGR_BLUE   0xF800
-#define BGR_WHITE  0xFFFF
-#define BGR_BLACK  0x0000
-#define BGR_YELLOW 0x07FF
 
 #define SD_CLK 16
 #define SD_CMD 15
 #define SD_D0  17
 
-// ============ PANTALLA ============
-Arduino_DataBus *bus = new Arduino_ESP32SPI(45 /* DC */, 21 /* CS */, 38 /* SCK */, 39 /* MOSI */);
+Arduino_DataBus *bus = new Arduino_ESP32SPI(45, 21, 38, 39);
 Arduino_GFX *gfx = new Arduino_ST7789(
-    bus, 40 /* RST */, 0 /* rotation */, false /* IPS */,
-    172 /* width */, 320 /* height */,
-    34 /* col_offset1 */, 0 /* row_offset1 */,
-    34 /* col_offset2 */, 0 /* row_offset2 */);
+    bus, 40, 0, false,
+    172, 320,
+    34, 0,
+    34, 0);
 
-// ============ PNG DECODER ============
 PNG png;
 uint16_t globalLineBuffer[512];
 
@@ -57,16 +57,22 @@ int32_t pngSeek(PNGFILE *handle, int32_t position) {
 }
 
 int pngDraw(PNGDRAW *pDraw) {
-  if (pDraw->y >= gfx->height()) return 0;
+  int y = pDraw->y + pngOffsetY;
+  
+  if (y >= gfx->height()) return 0; 
+  
   int drawWidth = pDraw->iWidth;
-  if (drawWidth > gfx->width()) drawWidth = gfx->width();
+  
+  if (pngOffsetX + drawWidth > gfx->width()) {
+    drawWidth = gfx->width() - pngOffsetX;
+  }
+  
   png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
-  gfx->draw16bitRGBBitmap(0, pDraw->y, globalLineBuffer, drawWidth, 1);
+  gfx->draw16bitRGBBitmap(pngOffsetX, y, globalLineBuffer, drawWidth, 1);
   return 1;
 }
 
-// ============ TOUCH (corregido) ============
-bool leer_touch_corregido(uint16_t &x, uint16_t &y) {
+bool leerTouch(uint16_t &x, uint16_t &y) {
   Wire.beginTransmission(0x63);
   Wire.write(0x02);
   Wire.endTransmission();
@@ -88,47 +94,37 @@ bool leer_touch_corregido(uint16_t &x, uint16_t &y) {
   return false;
 }
 
-// ============ GESTIÓN DE IMÁGENES ============
 const int MAX_IMAGES = 20;
 String imageFiles[MAX_IMAGES];
 int imageCount = 0;
 int currentImage = 0;
-bool fallbackMode = false;   // true si no hay SD o no hay imágenes
+bool fallbackMode = false;
 
-// Dibuja la imagen `index` del array
 void drawImage(int index) {
   if (fallbackMode || imageCount == 0 || index < 0 || index >= imageCount) return;
 
-  gfx->fillScreen(BGR_BLACK);
+  gfx->fillScreen(MAT_BG);
   String fullPath = "/" + imageFiles[index];
   int rc = png.open(fullPath.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw);
   if (rc == PNG_SUCCESS) {
     png.decode(NULL, 0);
     png.close();
-    Serial.printf("Mostrando imagen %d: %s\n", index, imageFiles[index].c_str());
-  } else {
-    Serial.printf("Error al abrir %s (código %d)\n", imageFiles[index].c_str(), rc);
   }
 }
 
-// Dibuja el fallback: líneas de colores + coordenadas
 void drawFallback() {
-  gfx->fillScreen(BGR_BLACK);
+  gfx->fillScreen(MAT_BG);
   int h = gfx->height();
   int step = h / 6;
   uint16_t colors[] = {BGR_RED, BGR_GREEN, BGR_BLUE, BGR_YELLOW, BGR_WHITE, BGR_BLACK};
   for (int i = 0; i < 6; i++) {
     gfx->fillRect(0, i * step, gfx->width(), step, colors[i % 6]);
   }
-  // Preparamos un área central para las coordenadas
   gfx->setTextSize(2);
   gfx->setTextColor(BGR_WHITE, BGR_BLACK);
-  // Se actualizará en el loop con las coordenadas
 }
 
-// Actualiza el texto de coordenadas en el fallback
 void updateFallbackCoords(uint16_t x, uint16_t y) {
-  // Borra el área donde escribimos (rectángulo negro)
   int boxW = 160;
   int boxH = 30;
   int boxX = (gfx->width() - boxW) / 2;
@@ -136,57 +132,76 @@ void updateFallbackCoords(uint16_t x, uint16_t y) {
   gfx->fillRect(boxX, boxY, boxW, boxH, BGR_BLACK);
   gfx->setCursor(boxX + 10, boxY + 8);
   gfx->setTextColor(BGR_WHITE);
-  gfx->printf("X:%03d Y:%03d", x, y);
+  gfx->printf("Conecta la SD para comenzar", x, y);
 }
 
-// ============ SETUP ============
+// Función para verificar la SD en un bucle
+bool esperarSD() {
+  // Pantalla de espera
+  gfx->fillScreen(MAT_BG);
+  imprimirCentrado("SD", 130, 2);
+  imprimirCentrado("no detectada", 160, 2);
+  imprimirCentrado("Por favor insertela", 190, 1);
+     
+  while (true) {
+    SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
+    if (SD_MMC.begin("/sdcard", true)) {
+      // SD detectada, salir del bucle
+      return true;
+    }
+
+    delay(500);
+  }
+}
+
 void setup() {
   Serial.begin(115200);
   delay(1000);
-  Serial.println("=== CARRUSEL DE IMÁGENES CON DESLIZAMIENTO ===");
 
-  // Encender backlight
+  // Inicialización de hardware base
   pinMode(TFT_BL, OUTPUT);
   digitalWrite(TFT_BL, HIGH);
   gfx->begin();
-
-  // Forzar modo BGR
   bus->beginWrite();
   bus->writeCommand(0x36);
-  bus->write(0x48); // 0x48 = BGR
+  bus->write(0x48); 
   bus->endWrite();
-
-  // Inicializar touch
   touch_init();
 
-  // Inicializar SD
-  SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
-  if (SD_MMC.begin("/sdcard", true)) {
-    Serial.println("SD OK. Escaneando archivos PNG...");
+  gfx->fillScreen(MAT_BG);
+  gfx->setTextColor(BGR_WHITE); 
+  gfx->setTextSize(2);
+  imprimirCentrado("This is 4", 130, 2);
+  imprimirCentrado("u babe...", 160, 2);
+  delay(1500);
+  gfx->fillScreen(MAT_BG);
+
+
+  // 1. Espera activa por SD
+  if (esperarSD()) {
+    // Escanear archivos solo si la SD respondió
     File root = SD_MMC.open("/");
     File file = root.openNextFile();
     while (file && imageCount < MAX_IMAGES) {
       if (!file.isDirectory()) {
         String name = file.name();
         name.toLowerCase();
-        if (name.endsWith(".png")) {
+        if (name.endsWith(".png") && name != "qr network.png") { 
           imageFiles[imageCount++] = file.name();
-          Serial.printf("  - %s\n", file.name());
         }
       }
       file = root.openNextFile();
     }
     root.close();
-    Serial.printf("Total de imágenes PNG: %d\n", imageCount);
-  } else {
-    Serial.println("Fallo al inicializar SD.");
   }
 
-  // Decidir modo
+  // 2. Gestión de red (Solo después de haber resuelto lo de la SD)
+  inicializarRed(); 
+
+  // 3. Inicio del juego
   if (imageCount == 0) {
     fallbackMode = true;
     drawFallback();
-    Serial.println("Modo fallback: sin imágenes.");
   } else {
     fallbackMode = false;
     currentImage = 0;
@@ -194,44 +209,52 @@ void setup() {
   }
 }
 
-// ============ LOOP ============
 void loop() {
+
+  // borrar redes si se recibe el comando "BORRAR" por el puerto serie
+  if (Serial.available() > 0) {
+    String comando = Serial.readStringUntil('\n');
+    comando.trim(); 
+
+    if (comando.equalsIgnoreCase("BORRAR")) {
+      borrarRedes();
+      delay(500);
+      ESP.restart(); 
+    }
+  }
+
+  // Manejo de gestos de deslizamiento
   static uint16_t lastX = 0, lastY = 0;
   static uint16_t touchStartX = 0, touchStartY = 0;
   static bool touching = false;
   static unsigned long lastGestureTime = 0;
-  const unsigned long GESTURE_COOLDOWN = 200; // ms
+  const unsigned long GESTURE_COOLDOWN = 200; 
 
   uint16_t x = 0, y = 0;
-  bool touched = leer_touch_corregido(x, y);
+  bool touched = leerTouch(x, y);
 
   if (touched) {
     lastX = x;
     lastY = y;
 
     if (!touching) {
-      // Inicio del toque
       touching = true;
       touchStartX = x;
       touchStartY = y;
     }
-    // Si estamos en fallback, actualizamos coordenadas en pantalla
     if (fallbackMode) {
       updateFallbackCoords(x, y);
     }
   } else {
     if (touching) {
-      // Se soltó el dedo → evaluar deslizamiento
       touching = false;
       unsigned long now = millis();
       if (now - lastGestureTime > GESTURE_COOLDOWN && !fallbackMode) {
         int deltaX = (int)lastX - (int)touchStartX;
-        if (abs(deltaX) > 30) {   // umbral de deslizamiento
+        if (abs(deltaX) > 30) {   
           if (deltaX > 0) {
-            // Deslizamiento hacia la derecha → siguiente imagen
             currentImage = (currentImage + 1) % imageCount;
           } else {
-            // Deslizamiento hacia la izquierda → anterior
             currentImage = (currentImage - 1 + imageCount) % imageCount;
           }
           drawImage(currentImage);

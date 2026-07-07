@@ -1,0 +1,43 @@
+name: Build Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Package SD files (optional)
+        run: |
+          if [ -d sd_root ]; then
+            cd sd_root
+            zip -r ../sd_files.zip .
+          else
+            echo "sd_root folder not found, skipping SD package."
+            echo "no_sd=true" >> $GITHUB_ENV
+          fi
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            .pio/build/esp32-s3-touch-lcd-1_47/firmware.bin
+            sd_files.zip
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

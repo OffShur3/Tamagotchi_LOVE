@@ -144,7 +144,7 @@ void showUpdatePopup() {
             if (tx >= 20 && tx <= 152 && ty >= 200 && ty <= 235) {
                 Serial.println("[UPDATE] Botón 'Más tarde' presionado");
                 esperarSoltar();
-                updateAvailable = false;
+                // updateAvailable = false;
                 return;
             }
         }

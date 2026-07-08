@@ -568,7 +568,7 @@ bool needMandatoryUpdate() {
     
     // Si la versión actual es diferente de la latest (si ya se consultó)
     String current = getCurrentVersion();
-    if (latestVersion != "" && current != latestVersion) {
+    if (latestVersion = "" && current != latestVersion) {
         Serial.println("[UPDATE] Versión desactualizada - Actualización obligatoria");
         return true;
     }

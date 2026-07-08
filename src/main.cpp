@@ -165,10 +165,12 @@ void loop() {
   static bool mandatoryUpdateDone = false;
   if (!mandatoryUpdateDone && WiFi.status() == WL_CONNECTED) {
     mandatoryUpdateDone = true;
+    // Obtener la última versión disponible en GitHub
+    checkForUpdate();
+    // Evaluar si es necesaria una actualización obligatoria
     if (needMandatoryUpdate()) {
       Serial.println("[MAIN] Iniciando actualización obligatoria...");
       performFullUpdate();
-      // Si performFullUpdate no reinicia, continuar
     } else {
       Serial.println("[MAIN] No se requiere actualización obligatoria");
     }

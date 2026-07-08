@@ -554,25 +554,33 @@ void updateVersionFile() {
 
 // --------------- Verificar si necesita actualización obligatoria ---------------
 bool needMandatoryUpdate() {
-    // Si no hay version.txt, actualización obligatoria
-    if (!SD_MMC.exists(CURRENT_VERSION_FILE)) {
-        Serial.println("[UPDATE] No hay version.txt - Actualización obligatoria");
-        return true;
-    }
-    
-    // Si no hay archivos PNG esenciales, también forzar
+    // 1. ¿Faltan archivos esenciales en la SD?
     if (!SD_MMC.exists("/QR Network.png")) {
         Serial.println("[UPDATE] Faltan archivos SD - Actualización obligatoria");
         return true;
     }
     
-    // Si la versión actual es diferente de la latest (si ya se consultó)
-    String current = getCurrentVersion();
-    if (latestVersion = "" && current != latestVersion) {
-        Serial.println("[UPDATE] Versión desactualizada - Actualización obligatoria");
+    // 2. ¿No existe el archivo de versión?
+    if (!SD_MMC.exists(CURRENT_VERSION_FILE)) {
+        Serial.println("[UPDATE] No hay version.txt - Actualización obligatoria");
         return true;
     }
     
+    String current = getCurrentVersion();
+    // 3. ¿La versión actual es la predeterminada (v0.0.0)?
+    if (current == "v0.0.0") {
+        Serial.println("[UPDATE] Versión actual v0.0.0 - Actualización obligatoria");
+        return true;
+    }
+    
+    // 4. ¿Hay una versión más reciente en GitHub?
+    if (latestVersion != "" && current != latestVersion) {
+        Serial.printf("[UPDATE] Versión actual %s, disponible %s - Actualización obligatoria\n",
+                      current.c_str(), latestVersion.c_str());
+        return true;
+    }
+    
+    // Si todo está en orden, no es necesario actualizar
     return false;
 }
 

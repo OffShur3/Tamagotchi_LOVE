@@ -12,6 +12,7 @@
 #include "touch_axs5106.h"
 #include "colors.h"
 #include "UI.h"
+#include "UpdateManager.h"
 
 int pngOffsetX = 0;
 int pngOffsetY = 0;
@@ -198,6 +199,11 @@ void setup() {
   // 2. Gestión de red (Solo después de haber resuelto lo de la SD)
   inicializarRed(); 
 
+  // Verificar si hay archivos de SD pendientes de actualizar
+  if (WiFi.status() == WL_CONNECTED) {
+    performSDUpdate();
+  }
+
   // 3. Inicio del juego
   if (imageCount == 0) {
     fallbackMode = true;
@@ -210,6 +216,12 @@ void setup() {
 }
 
 void loop() {
+  // Verificar actualizaciones periódicamente
+  static unsigned long lastUpdateCheck = 0;
+  if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    lastUpdateCheck = millis();
+    checkForUpdate();
+  }
 
   // borrar redes si se recibe el comando "BORRAR" por el puerto serie
   if (Serial.available() > 0) {
@@ -263,6 +275,13 @@ void loop() {
       }
     }
   }
-
+  // Dibujar badge de actualización si está disponible
+  if (updateAvailable && !updateInProgress) {
+    drawUpdateBadge();
+    if (touched && isTouchingBadge(x, y)) {
+      showUpdatePopup();
+    }
+  }
+    
   delay(20);
 }

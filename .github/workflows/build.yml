@@ -29,7 +29,7 @@ jobs:
         run: |
           if [ -d sd_root ]; then
             cd sd_root
-            zip -r ../sd_files.zip .
+            tar -cvf ../sd_files.tar .
           else
             echo "sd_root folder not found, skipping SD package."
           fi
@@ -39,7 +39,7 @@ jobs:
         with:
           files: |
             .pio/build/esp32-s3-touch-lcd-1_47/firmware.bin
-            sd_files.zip
+            sd_files.tar
           fail_on_unmatched_files: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -577,25 +577,37 @@ void drawProgressScreen(const String& title, int progress, int total, bool redra
     static String lastTitle = "";
     if (redrawAll || lastTitle != title) {
         gfx->fillScreen(MAT_BG);
+        lastTitle = title;
+        
+        // Título centrado
         gfx->setTextColor(BGR_WHITE);
         gfx->setTextSize(1);
-        imprimirCentrado(title, 80, 1);
-        lastTitle = title;
+        int titleWidth = title.length() * 6;
+        int titleX = (gfx->width() - titleWidth) / 2;
+        gfx->setCursor(titleX, 80);
+        gfx->print(title);
     }
-
-    int barWidth = 132, barHeight = 20, barX = 20, barY = 120;
     
-    // Redibujar el contorno solo la primera vez (cuando redrawAll true), pero es más fácil dibujarlo siempre
-    gfx->drawRect(barX, barY, barWidth, barHeight, BGR_WHITE);
+    int barX = 20, barY = 130, barW = 132, barH = 20;
+    gfx->drawRect(barX, barY, barW, barH, BGR_WHITE);
     
-    int filled = (total > 0) ? ((barWidth - 4) * progress / total) : 0;
-    gfx->fillRect(barX + 2, barY + 2, filled, barHeight - 4, MAT_CONNECT);
-    gfx->fillRect(barX + 2 + filled, barY + 2, (barWidth - 4) - filled, barHeight - 4, MAT_BG);
-
-    gfx->setCursor(70, 150);
-    gfx->setTextColor(BGR_WHITE);
+    int filled = 0;
     if (total > 0) {
-        gfx->printf("%d%%", (progress * 100) / total);
+        filled = (barW - 4) * progress / total;
+    }
+    if (filled > 0) {
+        gfx->fillRect(barX + 2, barY + 2, filled, barH - 4, MAT_CONNECT);
+    }
+    if (filled < barW - 4) {
+        gfx->fillRect(barX + 2 + filled, barY + 2, (barW - 4) - filled, barH - 4, MAT_BG);
+    }
+    
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    gfx->setCursor(barX + 40, barY + barH + 10);
+    if (total > 0) {
+        int pct = (progress * 100) / total;
+        gfx->print(String(pct) + "%");
     } else {
         gfx->print("...");
     }
@@ -604,11 +616,9 @@ void drawProgressScreen(const String& title, int progress, int total, bool redra
 // --------------- Actualización completa (SD + OTA) ---------------
 void performFullUpdate() {
     updateInProgress = true;
-    String current = getCurrentVersion();
-    
-    // Si no tenemos latestVersion, obtenerla
+
+    // Obtener latestVersion si no la tenemos
     if (latestVersion == "") {
-        // Llamada rápida a checkForUpdate solo para obtener latestVersion
         HTTPClient http;
         http.setTimeout(10000);
         String url = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
@@ -627,102 +637,129 @@ void performFullUpdate() {
         }
         http.end();
     }
-    
-    // ===== PASO 1: Descargar y actualizar SD =====
+
+    // ===== PASO 1: Descargar sd_files.tar =====
     drawProgressScreen("Descargando SD...", 0, 1, true);
-    
     String sdUrl = getAssetUrl("sd_files.tar");
-    if (sdUrl != "") {
-        HTTPClient http;
-        http.setTimeout(30000);
-        http.begin(sdUrl);
-        http.addHeader("User-Agent", "Tamagotchi-ESP32");
-        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-        
-        int code = http.GET();
-        if (code == 200) {
-            int contentLength = http.getSize();
-            WiFiClient *stream = http.getStreamPtr();
-            File tarFile = SD_MMC.open("/update.tar", "w");
-            
-            if (tarFile) {
-                uint8_t buffer[256];
-                int downloaded = 0;
-                
-                while (http.connected() && downloaded < contentLength) {
-                    size_t available = stream->available();
-                    if (available) {
-                        int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
-                        tarFile.write(buffer, bytesRead);
-                        downloaded += bytesRead;
-                        
-                        if (contentLength > 0) {
-                            drawProgressScreen("Descargando SD...", downloaded, contentLength);
-                        }
-                    }
-                    yield();
-                }
-                tarFile.close();
-                http.end();
-                
-                // Extraer TAR
-                drawProgressScreen("Actualizando SD...", 0, 1, true);
-                extractTar("/update.tar", "/");
-                SD_MMC.remove("/update.tar");
-            } else {
-                http.end();
-            }
-        } else {
-            http.end();
-        }
+    if (sdUrl == "") {
+        drawProgressScreen("Error: SD no disponible", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
     }
-    
-    // ===== PASO 2: Actualizar version.txt =====
+
+    HTTPClient http;
+    http.setTimeout(30000);
+    http.begin(sdUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    int code = http.GET();
+    if (code != 200) {
+        http.end();
+        drawProgressScreen("Error al descargar SD", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
+    }
+
+    int contentLength = http.getSize();
+    WiFiClient *stream = http.getStreamPtr();
+    File tarFile = SD_MMC.open("/update.tar", "w");
+    if (!tarFile) {
+        http.end();
+        drawProgressScreen("Error al crear /update.tar", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
+    }
+
+    uint8_t buffer[256];
+    int downloaded = 0;
+    while (http.connected() && downloaded < contentLength) {
+        size_t available = stream->available();
+        if (available) {
+            int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
+            tarFile.write(buffer, bytesRead);
+            downloaded += bytesRead;
+            if (contentLength > 0) {
+                drawProgressScreen("Descargando SD...", downloaded, contentLength);
+            }
+        }
+        yield();
+    }
+    tarFile.close();
+    http.end();
+
+    // Extraer TAR
+    drawProgressScreen("Actualizando SD...", 0, 1, true);
+    extractTar("/update.tar", "/");
+    SD_MMC.remove("/update.tar");
+
+    // Actualizar version.txt
     updateVersionFile();
-    
-    // ===== PASO 3: Descargar y aplicar OTA =====
+
+    // ===== PASO 2: Descargar firmware.bin y OTA =====
     drawProgressScreen("Descargando firmware...", 0, 1, true);
-    
     String fwUrl = getAssetUrl("firmware.bin");
-    if (fwUrl != "") {
-        HTTPClient http;
-        http.begin(fwUrl);
-        http.addHeader("User-Agent", "Tamagotchi-ESP32");
-        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-        
-        int code = http.GET();
-        if (code == 200) {
-            int contentLength = http.getSize();
-            
-            if (Update.begin(contentLength)) {
-                WiFiClient *stream = http.getStreamPtr();
-                uint8_t buffer[512];
-                int bytesWritten = 0;
-                
-                while (http.connected() && bytesWritten < contentLength) {
-                    size_t available = stream->available();
-                    if (available) {
-                        int bytesRead = stream->readBytes(buffer, min((size_t)512, available));
-                        Update.write(buffer, bytesRead);
-                        bytesWritten += bytesRead;
-                        
-                        if (contentLength > 0) {
-                            drawProgressScreen("Descargando firmware...", bytesWritten, contentLength);
-                        }
-                    }
-                    yield();
-                }
-                http.end();
-                
-                if (Update.end()) {
-                    drawProgressScreen("Actualizado! Reiniciando...", 1, 1, true);
-                    delay(2000);
-                    ESP.restart();
-                }
-            }
-            http.end();
-        }
+    if (fwUrl == "") {
+        drawProgressScreen("Error: Firmware no disponible", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
     }
-    
+
+    HTTPClient httpFw;
+    httpFw.begin(fwUrl);
+    httpFw.addHeader("User-Agent", "Tamagotchi-ESP32");
+    httpFw.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+    code = httpFw.GET();
+    if (code != 200) {
+        httpFw.end();
+        drawProgressScreen("Error al descargar firmware", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
+    }
+
+    contentLength = httpFw.getSize();
+    if (!Update.begin(contentLength)) {
+        httpFw.end();
+        drawProgressScreen("Error OTA begin", 0, 1, true);
+        delay(3000);
+        updateInProgress = false;
+        return;
+    }
+
+    stream = httpFw.getStreamPtr();
+    int bytesWritten = 0;
+    uint8_t otaBuffer[512];
+    while (httpFw.connected() && bytesWritten < contentLength) {
+        size_t available = stream->available();
+        if (available) {
+            int bytesRead = stream->readBytes(otaBuffer, min((size_t)512, available));
+            Update.write(otaBuffer, bytesRead);
+            bytesWritten += bytesRead;
+            if (contentLength > 0) {
+                drawProgressScreen("Descargando firmware...", bytesWritten, contentLength);
+            }
+        }
+        yield();
+    }
+    httpFw.end();
+
+    if (Update.end()) {
+        File versionFile = SD_MMC.open(CURRENT_VERSION_FILE, "w");
+        if (versionFile) {
+            versionFile.println(latestVersion);
+            versionFile.close();
+        }
+        drawProgressScreen("Actualizado! Reiniciando...", 1, 1, true);
+        delay(2000);
+        ESP.restart();
+    } else {
+        drawProgressScreen("Error OTA final", 0, 1, true);
+        delay(3000);
+    }
+
     updateInProgress = false;
 }

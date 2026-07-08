@@ -219,6 +219,7 @@ void loop() {
   // Verificar actualizaciones periódicamente
   static unsigned long lastUpdateCheck = 0;
   if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    Serial.println("[MAIN] Iniciando verificación de actualizaciones...");
     lastUpdateCheck = millis();
     checkForUpdate();
   }

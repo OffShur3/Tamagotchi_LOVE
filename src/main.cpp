@@ -199,11 +199,6 @@ void setup() {
   // 2. Gestión de red (Solo después de haber resuelto lo de la SD)
   inicializarRed(); 
 
-  // Verificar si hay archivos de SD pendientes de actualizar
-  if (WiFi.status() == WL_CONNECTED) {
-    performSDUpdate();
-  }
-
   // 3. Inicio del juego
   if (imageCount == 0) {
     fallbackMode = true;
@@ -216,6 +211,14 @@ void setup() {
 }
 
 void loop() {
+  // Actualización de SD pendiente (solo una vez al inicio)
+  static bool sdChecked = false;
+  if (!sdChecked && WiFi.status() == WL_CONNECTED) {
+    sdChecked = true;
+    Serial.println("[MAIN] Verificando actualización de SD por primera vez...");
+    performSDUpdate();
+  }
+
   // Verificar actualizaciones periódicamente
   static unsigned long lastUpdateCheck = 0;
   if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {

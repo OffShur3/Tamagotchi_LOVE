@@ -203,20 +203,23 @@ void showConfirmPopup() {
 String getAssetUrl(String assetName) {
     Serial.printf("[UPDATE] Buscando asset '%s'...\n", assetName.c_str());
 
-    HTTPClient http;
+    HTTPClient *http = new HTTPClient();
     String apiUrl = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
-    http.begin(apiUrl);
-    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    http->begin(apiUrl);
+    http->addHeader("User-Agent", "Tamagotchi-ESP32");
+    http->setTimeout(10000);
 
-    int code = http.GET();
+    int code = http->GET();
     Serial.printf("[UPDATE] API status: %d\n", code);
     if (code != 200) {
-        http.end();
+        http->end();
+        delete http;
         return "";
     }
 
-    String payload = http.getString();
-    http.end();
+    String payload = http->getString();
+    http->end();
+    delete http;
 
     StaticJsonDocument<4096> doc;
     DeserializationError error = deserializeJson(doc, payload);
@@ -293,12 +296,12 @@ void performFirmwareUpdate() {
     Serial.println("[OTA] Descargando y escribiendo...");
     int progress = 0, bytesWritten = 0;
     WiFiClient *stream = http.getStreamPtr();
-    uint8_t buffer[1024];
+    uint8_t buffer[512];
 
     while (http.connected() && bytesWritten < contentLength) {
         size_t available = stream->available();
         if (available) {
-            int bytesRead = stream->readBytes(buffer, min((size_t)1024, available));
+            int bytesRead = stream->readBytes(buffer, min((size_t)512, available));
             Update.write(buffer, bytesRead);
             bytesWritten += bytesRead;
 
@@ -378,42 +381,48 @@ void performSDUpdate() {
         return;
     }
 
-    HTTPClient http;
-    http.begin(downloadUrl);
-    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    // Usar HTTPClient en el heap
+    HTTPClient *http = new HTTPClient();
+    http->begin(downloadUrl);
+    http->addHeader("User-Agent", "Tamagotchi-ESP32");
+    http->setTimeout(30000);
 
-    int code = http.GET();
+    int code = http->GET();
     Serial.printf("[SD] Descarga sd_files.tar, HTTP code: %d\n", code);
     if (code != 200) {
-        http.end();
+        http->end();
+        delete http;
         Serial.println("[SD] ERROR: Falló la descarga del TAR");
         return;
     }
 
-    WiFiClient *stream = http.getStreamPtr();
+    WiFiClient *stream = http->getStreamPtr();
     File tarFile = SD_MMC.open("/update.tar", "w");
     if (!tarFile) {
-        http.end();
+        http->end();
+        delete http;
         Serial.println("[SD] ERROR: No se pudo crear /update.tar");
         return;
     }
 
-    uint8_t buffer[512];
-    int contentLength = http.getSize();
+    // Buffer pequeño en stack, procesamiento por chunks
+    uint8_t buffer[256];
+    int contentLength = http->getSize();
     int downloaded = 0;
     Serial.printf("[SD] Descargando TAR (%d bytes)...\n", contentLength);
 
-    while (http.connected() && downloaded < contentLength) {
+    while (http->connected() && downloaded < contentLength) {
         size_t available = stream->available();
         if (available) {
-            int bytesRead = stream->readBytes(buffer, min((size_t)512, available));
+            int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
             tarFile.write(buffer, bytesRead);
             downloaded += bytesRead;
         }
-        delay(10);
+        yield(); // Permitir que el watchdog respire
     }
     tarFile.close();
-    http.end();
+    http->end();
+    delete http;
     Serial.printf("[SD] TAR descargado: %d bytes\n", downloaded);
 
     Serial.println("[SD] Extrayendo TAR...");

@@ -144,8 +144,12 @@ void showUpdatePopup() {
             if (tx >= 20 && tx <= 152 && ty >= 200 && ty <= 235) {
                 Serial.println("[UPDATE] Botón 'Más tarde' presionado");
                 esperarSoltar();
-                // updateAvailable = false;
-                return;
+
+                // Restaurar la pantalla
+                gfx->fillScreen(MAT_BG);
+                if (game) game->redraw();
+                
+                return;  // badge seguirá visible porque updateAvailable sigue true
             }
         }
         delay(50);

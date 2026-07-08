@@ -89,3 +89,10 @@ void PhotoCarousel::update(uint16_t x, uint16_t y, bool screenTouched) {
         }
     }
 }
+void PhotoCarousel::redraw() {
+    if (fallbackMode) {
+        drawFallback();
+    } else {
+        drawImage(currentImage);
+    }
+}

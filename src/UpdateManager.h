@@ -7,6 +7,9 @@
 #include <SD_MMC.h>
 #include <FS.h>
 
+// Archivos
+#include "Game.h"
+
 #define GITHUB_USER "OffShur3"
 #define GITHUB_REPO "Tamagotchi_LOVE"
 #define CURRENT_VERSION_FILE "/version.txt"
@@ -15,6 +18,7 @@
 extern bool updateAvailable;
 extern String latestVersion;
 extern bool updateInProgress;
+extern Game* game; 
 
 bool checkForUpdate();
 void drawUpdateBadge();

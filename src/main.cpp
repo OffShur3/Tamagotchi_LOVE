@@ -75,7 +75,7 @@ int pngDraw(PNGDRAW *pDraw) {
 }
 
 // game
-PhotoCarousel* game = nullptr;
+Game* game = nullptr;
 
 bool leerTouch(uint16_t &x, uint16_t &y) {
   Wire.beginTransmission(0x63);

@@ -18,6 +18,7 @@ public:
     
     void init() override;
     void update(uint16_t x, uint16_t y, bool touched) override;
+    void redraw() override;
 
 private:
     Arduino_GFX* gfx;

@@ -167,10 +167,12 @@ void loop() {
     mandatoryUpdateDone = true;
     // Obtener la última versión disponible en GitHub
     checkForUpdate();
-    // Evaluar si es necesaria una actualización obligatoria
+    // Si hay una actualización obligatoria, activar el badge
     if (needMandatoryUpdate()) {
-      Serial.println("[MAIN] Iniciando actualización obligatoria...");
-      performFullUpdate();
+      Serial.println("[MAIN] Actualización obligatoria requerida");
+      updateAvailable = true;
+      mandatoryUpdate = true;
+      // No ejecutar performFullUpdate directamente
     } else {
       Serial.println("[MAIN] No se requiere actualización obligatoria");
     }

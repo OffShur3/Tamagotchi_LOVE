@@ -10,6 +10,7 @@
 bool updateAvailable = false;
 String latestVersion = "";
 bool updateInProgress = false;
+bool mandatoryUpdate = false;
 
 // --------------- Verificar actualización desde GitHub ---------------
 bool checkForUpdate() {
@@ -181,9 +182,13 @@ void showConfirmPopup() {
             Serial.printf("[UPDATE] Confirm - Touch en x=%d, y=%d\n", tx, ty);
 
             if (tx >= 20 && tx <= 75 && ty >= 170 && ty <= 205) {
-                Serial.println("[UPDATE] Botón 'Sí' presionado - INICIANDO OTA");
+                Serial.println("[UPDATE] Botón 'Sí' presionado");
                 esperarSoltar();
-                performFirmwareUpdate();
+                if (mandatoryUpdate) {
+                    performFullUpdate();
+                } else {
+                    performFirmwareUpdate();
+                }
                 return;
             }
             if (tx >= 97 && tx <= 152 && ty >= 170 && ty <= 205) {

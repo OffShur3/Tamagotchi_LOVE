@@ -18,6 +18,7 @@
 extern bool updateAvailable;
 extern String latestVersion;
 extern bool updateInProgress;
+extern bool mandatoryUpdate;
 extern Game* game; 
 
 bool checkForUpdate();

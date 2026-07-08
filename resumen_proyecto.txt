@@ -1,0 +1,1326 @@
+This file is a merged representation of a subset of the codebase, containing files not matching ignore patterns, combined into a single document by Repomix.
+
+<file_summary>
+This section contains a summary of this file.
+
+<purpose>
+This file contains a packed representation of a subset of the repository's contents that is considered the most important context.
+It is designed to be easily consumable by AI systems for analysis, code review,
+or other automated processes.
+</purpose>
+
+<file_format>
+The content is organized as follows:
+1. This summary section
+2. Repository information
+3. Directory structure
+4. Repository files (if enabled)
+5. Multiple file entries, each consisting of:
+  - File path as an attribute
+  - Full contents of the file
+</file_format>
+
+<usage_guidelines>
+- This file should be treated as read-only. Any changes should be made to the
+  original repository files, not this packed version.
+- When processing this file, use the file path to distinguish
+  between different files in the repository.
+- Be aware that this file may contain sensitive information. Handle it with
+  the same level of security as you would the original repository.
+</usage_guidelines>
+
+<notes>
+- Some files may have been excluded based on .gitignore rules and Repomix's configuration
+- Binary files are not included in this packed representation. Please refer to the Repository Structure section for a complete list of file paths, including binary files
+- Files matching these patterns are excluded: .git
+- Files matching patterns in .gitignore are excluded
+- Files matching default ignore patterns are excluded
+- Files are sorted by Git change count (files with more changes are at the bottom)
+</notes>
+
+</file_summary>
+
+<directory_structure>
+.github/
+  workflows/
+    build.yml
+sd_root/
+  QR Network.png
+  version.txt
+  Waveshare Image10.png
+  Waveshare Image2.png
+  Waveshare Image3.png
+  Waveshare Image4.png
+  Waveshare Image5.png
+  Waveshare Image6.png
+  Waveshare Image7.png
+  Waveshare Image8.png
+  Waveshare Image9.png
+  WaveshareImage1.png
+src/
+  colors.h
+  main.cpp
+  NetworkManager.cpp
+  NetworkManager.h
+  touch_axs5106.h
+  UI.cpp
+  UI.h
+  UpdateManager.cpp
+  UpdateManager.h
+.gitignore
+platformio.ini
+shell.nix
+upload.sh
+</directory_structure>
+
+<files>
+This section contains the contents of the repository's files.
+
+<file path="sd_root/version.txt">
+v0.0.3
+</file>
+
+<file path="src/NetworkManager.cpp">
+#include "NetworkManager.h"
+#include "colors.h"
+
+WebServer server(80);
+DNSServer dnsServer;
+Preferences preferences;
+WiFiMulti wifiMulti;
+
+const byte DNS_PORT = 53;
+
+const char HTML_HEADER[] PROGMEM = 
+"<!DOCTYPE html><html><head><meta charset='UTF-8'><meta name='viewport' content='width=device-width, initial-scale=1.0'>"
+"<title>TamaConfig - Wi-Fi</title><style>"
+"body{font-family:Arial,sans-serif;background-color:#f4f7f6;color:#333;margin:0;padding:20px;text-align:center;}"
+".card{background:white;padding:25px;border-radius:15px;box-shadow:0 4px 15px rgba(0,0,0,0.1);max-width:400px;margin:auto;}"
+"h2{color:#4A90E2;margin-bottom:10px;}"
+"p{font-size:14px;color:#666;}"
+"select,input[type='password'],input[type='submit']{width:100%;padding:12px;margin:10px 0;border-radius:8px;border:1px solid #ccc;box-sizing:border-box;font-size:16px;}"
+"select{background-color:#fff;}"
+"input[type='submit']{background-color:#4A90E2;color:white;border:none;cursor:pointer;font-weight:bold;transition:0.3s;}"
+"input[type='submit']:hover{background-color:#357ABD;}"
+".footer{margin-top:20px;font-size:11px;color:#aaa;}"
+"</style></head><body><div class='card'>";
+
+bool redConfigurada = false; // Definición inicial
+
+void inicializarRed() {
+    // Si ya configuramos la red, no volvemos a pasar por este proceso
+    if (redConfigurada) return;
+
+    gfx->fillScreen(MAT_BG);
+    gfx->setTextColor(BGR_WHITE);
+    imprimirCentrado("Conectando...", 150, 2);
+
+    preferences.begin("wifi-config", false);
+    int netCount = preferences.getInt("netCount", 0);
+
+    if (netCount > 0) {
+        for (int i = 0; i < netCount; i++) {
+            String ssidKey = "ssid" + String(i);
+            String passKey = "pass" + String(i);
+            String s = preferences.getString(ssidKey.c_str(), "");
+            String p = preferences.getString(passKey.c_str(), "");
+            
+            if (s != "") {
+                wifiMulti.addAP(s.c_str(), p.c_str());
+            }
+        }
+        preferences.end();
+
+        int intentos = 0;
+        while (wifiMulti.run() != WL_CONNECTED && intentos < 20) {
+            delay(500);
+            intentos++;
+        }
+
+        if (WiFi.status() == WL_CONNECTED) {
+            gfx->fillScreen(MAT_BG);
+            gfx->setTextColor(BGR_GREEN);
+            imprimirCentrado("Online!", 150, 2);
+            delay(1500);
+            redConfigurada = true;
+            return;
+        }
+    }
+    preferences.end();
+
+    // Bucle de menú hasta que el usuario decida
+    while (true) {
+        if (!pantallaOpcionRed()) {   // Eligió Offline
+            redConfigurada = true;
+            return;
+        }
+        // Eligió Conectar → abrir portal
+        bool conectado = iniciarPortalCautivo();
+        if (conectado) {
+            // Esto realmente no se alcanzará porque guardarCredenciales()
+            // hace ESP.restart(), pero dejamos la lógica clara.
+            redConfigurada = true;
+            return;
+        }
+        // Si se canceló (gesto), el bucle repite el menú automáticamente
+    }
+}
+
+bool pantallaOpcionRed() {
+    gfx->fillScreen(MAT_BG);
+
+    gfx->setTextColor(BGR_WHITE);
+    imprimirCentrado("Sin Conexion", 30, 2);
+
+    // Dibuja los botones en una sola línea con todo integrado
+    dibujarBoton(10, 80, 152, 60, 12, MAT_OFFLINE, "Offline", 2, BGR_WHITE);
+    dibujarBoton(10, 180, 152, 60, 12, MAT_CONNECT, "Conectar", 2, BGR_WHITE);
+
+    uint16_t x, y;
+    while (true) {
+        if (leerTouch(x, y)) {
+            if (y > 80 && y < 140) {
+                gfx->fillScreen(MAT_BG);
+                return false; 
+            }
+            if (y > 180 && y < 240) {
+                gfx->fillScreen(MAT_BG);
+                return true; 
+            }
+        }
+        delay(50);
+    }
+}
+
+bool iniciarPortalCautivo() {
+    WiFi.mode(WIFI_AP);
+    WiFi.softAP("TamaConfig", "iluvUiluvU<3");
+    delay(100); 
+
+    dnsServer.setErrorReplyCode(DNSReplyCode::NoError);
+    dnsServer.start(DNS_PORT, "*", WiFi.softAPIP());
+
+    server.on("/", cargarPaginaConfig);
+    server.on("/save", HTTP_POST, guardarCredenciales);
+    
+    server.onNotFound([]() {
+        server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString(), true);
+        server.send(302, "text/plain", "");
+    });
+
+    server.begin();
+
+    gfx->fillScreen(MAT_BG);
+    
+    pngOffsetX = 36; pngOffsetY = 25;
+    int rc = png.open("/QR Network.png", pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+    if (rc == PNG_SUCCESS) { png.decode(NULL, 0); png.close(); }
+    pngOffsetX = 0; pngOffsetY = 0;
+
+    gfx->setTextColor(BGR_YELLOW);
+    imprimirCentrado("Conecta tu celular a:", 135, 1);
+    
+    gfx->setTextColor(BGR_WHITE);
+    imprimirCentrado("TamaConfig", 150, 2);
+    
+    gfx->setTextColor(BGR_GREEN);
+    imprimirCentrado("Admite conexion", 185, 1);
+    imprimirCentrado("sin Internet", 200, 1);
+    
+    gfx->setTextColor(BGR_WHITE);
+    imprimirCentrado("Entra al navegador", 230, 1);
+    imprimirCentrado("y elige tu WiFi", 245, 1);
+    
+    imprimirCentrado("<3", 270, 2);
+
+    // Bucle de monitoreo para gestos de navegación
+    uint16_t startX = 0, startY = 0;
+    bool gestando = false;
+    uint16_t lastX = 0;
+
+    while (true) {
+        procesarPortal();
+
+        uint16_t x, y;
+        bool tocado = leerTouch(x, y);
+
+        if (tocado) {
+            if (!gestando) {
+                gestando = true;
+                startX = x;
+            }
+            lastX = x;
+        } else if (gestando) {
+            gestando = false;
+            if ((lastX - startX) > 50) {
+                server.stop();
+                dnsServer.stop();
+                WiFi.mode(WIFI_STA);
+                return false;   // Cancelado por el usuario
+            }
+        }
+        delay(10);
+    }
+}
+
+void procesarPortal() {
+    dnsServer.processNextRequest();
+    server.handleClient();
+    delay(10);
+}
+
+void cargarPaginaConfig() {
+    int n = WiFi.scanNetworks();
+    
+    String html = FPSTR(HTML_HEADER); 
+    html += "<h2>TamaConfig</h2>";
+    html += "<p>Selecciona la red de tu hogar para conectar tu Tamagotchi:</p>";
+    html += "<form method='POST' action='/save'>";
+    html += "<select name='ssid'>";
+    
+    if (n == 0) {
+        html += "<option value=''>No se encontraron redes</option>";
+    } else {
+        for (int i = 0; i < n; ++i) {
+            html += "<option value='" + WiFi.SSID(i) + "'>" + WiFi.SSID(i) + " (" + String(WiFi.RSSI(i)) + " dBm)</option>";
+        }
+    }
+    html += "</select>";
+    html += "<input type='password' name='pass' placeholder='Contraseña de tu Wi-Fi' required>";
+    html += "<input type='submit' value='Agregar Red y Conectar'>";
+    html += "</form></div><div class='footer'>OpenSource Tamagotchi Project</div></body></html>";
+    
+    server.send(200, "text/html; charset=utf-8", html);
+}
+
+void guardarCredenciales() {
+    String reqSSID = server.arg("ssid");
+    String reqPASS = server.arg("pass");
+
+    if (reqSSID != "") {
+        preferences.begin("wifi-config", false);
+        int netCount = preferences.getInt("netCount", 0);
+        bool redExiste = false;
+
+        for (int i = 0; i < netCount; i++) {
+            String savedSSID = preferences.getString(("ssid" + String(i)).c_str(), "");
+            if (savedSSID == reqSSID) {
+                preferences.putString(("pass" + String(i)).c_str(), reqPASS);
+                redExiste = true;
+                break;
+            }
+        }
+
+        if (!redExiste) {
+            preferences.putString(("ssid" + String(netCount)).c_str(), reqSSID);
+            preferences.putString(("pass" + String(netCount)).c_str(), reqPASS);
+            preferences.putInt("netCount", netCount + 1);
+        }
+        
+        preferences.end();
+
+        String html = FPSTR(HTML_HEADER); 
+        html += "<h2>¡Datos Recibidos!</h2>";
+        html += "<p>Tu Tamagotchi ha guardado la red <b>" + reqSSID + "</b> y se esta reiniciando.</p>";
+        html += "<p>Ya puedes cerrar esta ventana.</p>";
+        html += "</div></body></html>";
+        
+        server.send(200, "text/html", html);
+        delay(2000);
+        
+        ESP.restart();
+    } else {
+        server.send(400, "text/plain", "Error: SSID Invalido");
+    }
+}
+
+void borrarRedes() {
+    preferences.begin("wifi-config", false);
+    preferences.clear();
+    preferences.end();
+    Serial.println("\n[!] Todas las redes Wi-Fi han sido borradas de la memoria.");
+}
+</file>
+
+<file path="src/NetworkManager.h">
+#ifndef NETWORK_MANAGER_H
+#define NETWORK_MANAGER_H
+
+// Librerias
+#include <WiFi.h>
+#include <WiFiMulti.h>
+#include <WebServer.h>
+#include <DNSServer.h>
+#include <Preferences.h>
+#include <Arduino_GFX_Library.h>
+#include <PNGdec.h>
+
+// Archivos
+#include "UI.h"
+
+extern WebServer server;
+extern DNSServer dnsServer;
+extern Preferences preferences;
+
+extern Arduino_GFX *gfx;
+extern PNG png;
+extern void *pngOpen(const char *filename, int32_t *size);
+extern void pngClose(void *handle);
+extern int32_t pngRead(PNGFILE *handle, uint8_t *buffer, int32_t length);
+extern int32_t pngSeek(PNGFILE *handle, int32_t position);
+extern int pngDraw(PNGDRAW *pDraw);
+extern int pngOffsetX;
+extern int pngOffsetY;
+extern bool redConfigurada;
+extern bool leerTouch(uint16_t &x, uint16_t &y); 
+
+void inicializarRed();
+bool pantallaOpcionRed();
+bool iniciarPortalCautivo();
+void procesarPortal();
+void cargarPaginaConfig();
+void guardarCredenciales();
+void borrarRedes();
+
+#endif
+</file>
+
+<file path="src/UI.cpp">
+#include "UI.h"
+
+void imprimirCentrado(String texto, int y, int size) {
+    gfx->setTextSize(size);
+    int anchoPorChar = size * 6;
+    int anchoTexto = texto.length() * anchoPorChar;
+    int x = (gfx->width() - anchoTexto) / 2;
+    
+    gfx->setCursor(x, y);
+    gfx->println(texto);
+}
+
+void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String texto, int textSize, uint16_t colorTexto) {
+    // 1. Dibujar el cuerpo del botón
+    gfx->fillRoundRect(x, y, w, h, r, colorFondo);
+    
+    // 2. Calcular el tamaño del texto para centrarlo perfectamente dentro del rectángulo
+    gfx->setTextSize(textSize);
+    int anchoPorChar = textSize * 6;
+    int altoPorChar = textSize * 8; // La fuente por defecto mide aprox 8px de alto base
+    
+    int anchoTexto = texto.length() * anchoPorChar;
+    
+    // 3. Ecuación para centrar: (posición del contenedor) + (espacio sobrante / 2)
+    int textX = x + (w - anchoTexto) / 2;
+    int textY = y + (h - altoPorChar) / 2;
+    
+    // 4. Imprimir el texto
+    gfx->setTextColor(colorTexto);
+    gfx->setCursor(textX, textY);
+    gfx->print(texto);
+}
+</file>
+
+<file path="src/UI.h">
+#ifndef UI_H
+#define UI_H
+
+#include <Arduino.h>
+#include <Arduino_GFX_Library.h>
+#include "colors.h"
+
+// Referencia al objeto global de la pantalla
+extern Arduino_GFX *gfx;
+
+// Prototipos de funciones de interfaz
+void imprimirCentrado(String texto, int y, int size);
+void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String texto, int textSize, uint16_t colorTexto);
+
+#endif
+</file>
+
+<file path="src/UpdateManager.cpp">
+#include "UpdateManager.h"
+#include "NetworkManager.h"
+#include "colors.h"
+#include "UI.h"
+#include <ArduinoJson.h>
+
+bool updateAvailable = false;
+String latestVersion = "";
+bool updateInProgress = false;
+
+// --------------- Estructura para parsear TAR ---------------
+struct TarHeader {
+    char name[100];
+    char mode[8];
+    char uid[8];
+    char gid[8];
+    char size[12];
+    char mtime[12];
+    char chksum[8];
+    char typeflag;
+    char linkname[100];
+    char magic[6];
+    char version[2];
+    char uname[32];
+    char gname[32];
+    char devmajor[8];
+    char devminor[8];
+    char prefix[155];
+    char padding[12];
+};
+
+// --------------- Verificar actualización desde GitHub ---------------
+bool checkForUpdate() {
+    if (WiFi.status() != WL_CONNECTED) return false;
+
+    HTTPClient http;
+    http.setTimeout(10000);
+    String url = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
+    http.begin(url);
+    
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+
+    int httpCode = http.GET();
+    if (httpCode != 200) {
+        http.end();
+        return false;
+    }
+
+    String payload = http.getString();
+    http.end();
+
+    StaticJsonDocument<2048> doc;
+    DeserializationError error = deserializeJson(doc, payload);
+    if (error) return false;
+
+    latestVersion = doc["tag_name"].as<String>();
+    
+    String current = getCurrentVersion();
+    if (latestVersion != current && latestVersion.length() > 0) {
+        updateAvailable = true;
+        return true;
+    }
+    return false;
+}
+
+// --------------- Leer versión actual ---------------
+String getCurrentVersion() {
+    if (!SD_MMC.exists(CURRENT_VERSION_FILE)) return "v0.0.0";
+    
+    File file = SD_MMC.open(CURRENT_VERSION_FILE, "r");
+    if (!file) return "v0.0.0";
+    
+    String version = file.readStringUntil('\n');
+    version.trim();
+    file.close();
+    return version;
+}
+
+// --------------- Dibujar badge ---------------
+void drawUpdateBadge() {
+    int badgeX = 8, badgeY = 8, badgeR = 12;
+    gfx->fillCircle(badgeX + badgeR, badgeY + badgeR, badgeR, BGR_RED);
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(2);
+    gfx->setCursor(badgeX + 7, badgeY + 4);
+    gfx->print("!");
+}
+
+bool isTouchingBadge(uint16_t x, uint16_t y) {
+    return (x >= 8 && x <= 32 && y >= 8 && y <= 32);
+}
+
+// --------------- Popup de actualización ---------------
+void showUpdatePopup() {
+    gfx->fillRoundRect(10, 80, 152, 160, 12, MAT_BG);
+    gfx->drawRoundRect(10, 80, 152, 160, 12, BGR_WHITE);
+    
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    imprimirCentrado("Nueva version!", 95, 1);
+    
+    gfx->setTextColor(BGR_GREEN);
+    gfx->setTextSize(2);
+    String versionText = latestVersion;
+    int xPos = 86 - (versionText.length() * 12) / 2;
+    gfx->setCursor(xPos, 115);
+    gfx->print(versionText);
+    
+    dibujarBoton(20, 155, 132, 35, 8, MAT_CONNECT, "Actualizar", 1, BGR_WHITE);
+    dibujarBoton(20, 200, 132, 35, 8, MAT_OFFLINE, "Mas tarde", 1, BGR_WHITE);
+    
+    uint16_t tx, ty;
+    while (true) {
+        if (leerTouch(tx, ty)) {
+            if (tx >= 20 && tx <= 152 && ty >= 155 && ty <= 190) {
+                showConfirmPopup();
+                return;
+            }
+            if (tx >= 20 && tx <= 152 && ty >= 200 && ty <= 235) {
+                updateAvailable = false;
+                return;
+            }
+        }
+        delay(50);
+    }
+}
+
+// --------------- Popup de confirmación ---------------
+void showConfirmPopup() {
+    gfx->fillRoundRect(10, 100, 152, 120, 12, MAT_BG);
+    gfx->drawRoundRect(10, 100, 152, 120, 12, BGR_WHITE);
+    
+    gfx->setTextColor(BGR_YELLOW);
+    gfx->setTextSize(1);
+    imprimirCentrado("Se reiniciara", 115, 1);
+    imprimirCentrado("el dispositivo", 130, 1);
+    imprimirCentrado("Continuar?", 145, 1);
+    
+    dibujarBoton(20, 170, 55, 35, 8, MAT_CONNECT, "Si", 1, BGR_WHITE);
+    dibujarBoton(97, 170, 55, 35, 8, MAT_OFFLINE, "No", 1, BGR_WHITE);
+    
+    uint16_t tx, ty;
+    while (true) {
+        if (leerTouch(tx, ty)) {
+            if (tx >= 20 && tx <= 75 && ty >= 170 && ty <= 205) {
+                performFirmwareUpdate();
+                return;
+            }
+            if (tx >= 97 && tx <= 152 && ty >= 170 && ty <= 205) {
+                updateAvailable = false;
+                return;
+            }
+        }
+        delay(50);
+    }
+}
+
+// --------------- Obtener URL de asset desde GitHub API ---------------
+String getAssetUrl(String assetName) {
+    HTTPClient http;
+    String apiUrl = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
+    http.begin(apiUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    
+    if (http.GET() != 200) {
+        http.end();
+        return "";
+    }
+    
+    String payload = http.getString();
+    http.end();
+    
+    StaticJsonDocument<4096> doc;
+    deserializeJson(doc, payload);
+    JsonArray assets = doc["assets"].as<JsonArray>();
+    
+    for (JsonObject asset : assets) {
+        if (String(asset["name"].as<const char*>()) == assetName) {
+            return asset["browser_download_url"].as<String>();
+        }
+    }
+    return "";
+}
+
+// --------------- Aplicar OTA ---------------
+void performFirmwareUpdate() {
+    gfx->fillScreen(MAT_BG);
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    imprimirCentrado("Descargando firmware...", 100, 1);
+
+    String downloadUrl = getAssetUrl("firmware.bin");
+    if (downloadUrl == "") {
+        gfx->setTextColor(BGR_RED);
+        imprimirCentrado("Firmware no encontrado", 130, 1);
+        delay(2000);
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(downloadUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    
+    if (http.GET() != 200) {
+        http.end();
+        gfx->setTextColor(BGR_RED);
+        imprimirCentrado("Error descarga", 130, 1);
+        delay(2000);
+        return;
+    }
+
+    int contentLength = http.getSize();
+    if (!Update.begin(contentLength)) {
+        http.end();
+        gfx->setTextColor(BGR_RED);
+        imprimirCentrado("Error OTA begin", 130, 1);
+        delay(2000);
+        return;
+    }
+
+    int progress = 0, bytesWritten = 0;
+    WiFiClient *stream = http.getStreamPtr();
+    uint8_t buffer[1024];
+    
+    while (http.connected() && bytesWritten < contentLength) {
+        size_t available = stream->available();
+        if (available) {
+            int bytesRead = stream->readBytes(buffer, min((size_t)1024, available));
+            Update.write(buffer, bytesRead);
+            bytesWritten += bytesRead;
+            
+            int newProgress = (bytesWritten * 100) / contentLength;
+            if (newProgress != progress) {
+                progress = newProgress;
+                gfx->fillRect(20, 150, 132, 20, MAT_BG);
+                gfx->drawRect(20, 150, 132, 20, BGR_WHITE);
+                gfx->fillRect(22, 152, (128 * progress) / 100, 16, MAT_CONNECT);
+                gfx->setCursor(50, 153);
+                gfx->setTextColor(BGR_WHITE);
+                gfx->printf("%d%%", progress);
+            }
+        }
+        delay(10);
+    }
+    
+    http.end();
+    
+    if (Update.end()) {
+        File file = SD_MMC.open(CURRENT_VERSION_FILE, "w");
+        if (file) {
+            file.println(latestVersion);
+            file.close();
+        }
+        
+        gfx->fillScreen(MAT_BG);
+        gfx->setTextColor(BGR_GREEN);
+        imprimirCentrado("Actualizado!", 140, 2);
+        imprimirCentrado("Reiniciando...", 170, 1);
+        delay(2000);
+        ESP.restart();
+    } else {
+        gfx->fillScreen(MAT_BG);
+        gfx->setTextColor(BGR_RED);
+        imprimirCentrado("Error OTA!", 140, 2);
+        delay(2000);
+    }
+}
+
+// --------------- Descargar y extraer archivos TAR ---------------
+void performSDUpdate() {
+    if (WiFi.status() != WL_CONNECTED) return;
+
+    String current = getCurrentVersion();
+    String latest = latestVersion;
+    if (latest == "") latest = current; // si no se ha chequeado aún
+    
+    // Si la versión de la SD ya es la misma que el firmware, no actualizar
+    if (current == latest) return;
+
+    gfx->fillScreen(MAT_BG);
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    imprimirCentrado("Actualizando SD...", 100, 1);
+
+    String downloadUrl = getAssetUrl("sd_files.tar");
+    if (downloadUrl == "") {
+        // No hay TAR, no es error fatal
+        updateVersionFile();
+        return;
+    }
+
+    HTTPClient http;
+    http.begin(downloadUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    
+    if (http.GET() != 200) {
+        http.end();
+        return;
+    }
+
+    // Descargar tar a archivo temporal
+    WiFiClient *stream = http.getStreamPtr();
+    File tarFile = SD_MMC.open("/update.tar", "w");
+    if (!tarFile) {
+        http.end();
+        return;
+    }
+
+    uint8_t buffer[512];
+    int contentLength = http.getSize();
+    int downloaded = 0;
+    
+    while (http.connected() && downloaded < contentLength) {
+        size_t available = stream->available();
+        if (available) {
+            int bytesRead = stream->readBytes(buffer, min((size_t)512, available));
+            tarFile.write(buffer, bytesRead);
+            downloaded += bytesRead;
+        }
+        delay(10);
+    }
+    tarFile.close();
+    http.end();
+
+    // Extraer TAR
+    extractTar("/update.tar", "/");
+    SD_MMC.remove("/update.tar");
+    
+    // Actualizar version.txt
+    updateVersionFile();
+    
+    gfx->setTextColor(BGR_GREEN);
+    imprimirCentrado("SD actualizada!", 160, 2);
+    delay(1500);
+}
+
+// --------------- Extraer archivo TAR ---------------
+void extractTar(const char* tarPath, const char* destDir) {
+    File tarFile = SD_MMC.open(tarPath, "r");
+    if (!tarFile) return;
+
+    TarHeader header;
+    
+    while (tarFile.read((uint8_t*)&header, sizeof(TarHeader)) == sizeof(TarHeader)) {
+        // Verificar si el header está vacío (fin del archivo)
+        if (header.name[0] == 0) break;
+        
+        // Calcular tamaño del archivo (en octal en el header)
+        size_t fileSize = 0;
+        for (int i = 0; i < 11 && header.size[i] != 0; i++) {
+            fileSize = fileSize * 8 + (header.size[i] - '0');
+        }
+        
+        String filename = String(destDir) + "/" + String(header.name);
+        
+        if (header.typeflag == '5' || filename.endsWith("/")) {
+            // Es un directorio
+            if (!SD_MMC.exists(filename)) {
+                SD_MMC.mkdir(filename);
+            }
+        } else if (fileSize > 0) {
+            // Es un archivo
+            // Borrar si existe
+            if (SD_MMC.exists(filename)) {
+                SD_MMC.remove(filename);
+            }
+            
+            File outFile = SD_MMC.open(filename, "w");
+            if (outFile) {
+                uint8_t buf[512];
+                size_t remaining = fileSize;
+                
+                while (remaining > 0) {
+                    size_t toRead = min((size_t)512, remaining);
+                    tarFile.read(buf, toRead);
+                    outFile.write(buf, toRead);
+                    remaining -= toRead;
+                }
+                outFile.close();
+            } else {
+                // Saltar este archivo
+                tarFile.seek(tarFile.position() + fileSize);
+            }
+        }
+        
+        // Los datos en TAR están alineados a bloques de 512 bytes
+        size_t blocks = (fileSize + 511) / 512;
+        tarFile.seek((tarFile.position() + 511) / 512 * 512);
+    }
+    
+    tarFile.close();
+}
+
+// --------------- Actualizar archivo de versión ---------------
+void updateVersionFile() {
+    File file = SD_MMC.open(CURRENT_VERSION_FILE, "w");
+    if (file) {
+        file.println(latestVersion);
+        file.close();
+    }
+}
+</file>
+
+<file path="src/UpdateManager.h">
+#ifndef UPDATE_MANAGER_H
+#define UPDATE_MANAGER_H
+
+#include <Arduino.h>
+#include <HTTPClient.h>
+#include <Update.h>
+#include <SD_MMC.h>
+#include <FS.h>
+
+#define GITHUB_USER "OffShur3"
+#define GITHUB_REPO "Tamagotchi_LOVE"
+#define CURRENT_VERSION_FILE "version.txt"
+#define UPDATE_CHECK_INTERVAL 300000
+
+extern bool updateAvailable;
+extern String latestVersion;
+extern bool updateInProgress;
+
+bool checkForUpdate();
+void drawUpdateBadge();
+bool isTouchingBadge(uint16_t x, uint16_t y);
+void showUpdatePopup();
+void showConfirmPopup();
+void performFirmwareUpdate();
+void performSDUpdate();
+String getCurrentVersion();
+void extractTar(const char* tarPath, const char* destDir);
+void updateVersionFile();
+
+#endif
+</file>
+
+<file path=".gitignore">
+.pio
+</file>
+
+<file path="shell.nix">
+{ pkgs ? import <nixpkgs> {} }:
+pkgs.mkShell {
+  buildInputs = [ pkgs.platformio ];
+  SSL_CERT_FILE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  REQUESTS_CA_BUNDLE = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";
+  GIT_SSL_CAINFO = "${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt";  # ← nueva línea
+}
+</file>
+
+<file path="upload.sh">
+nix-shell --run "pio run -t upload -t monitor"
+</file>
+
+<file path="src/colors.h">
+#ifndef COLORS_H
+#define COLORS_H
+
+#include <stdint.h>
+
+#define BGR_RED    0x001F
+#define BGR_GREEN  0x07E0
+#define BGR_BLUE   0xF800
+#define BGR_WHITE  0xFFFF
+#define BGR_BLACK  0x0000
+#define BGR_YELLOW 0x07FF
+
+#define RGB565_BGR(r, g, b) (((b & 0xF8) << 8) | ((g & 0xFC) << 3) | (r >> 3))
+
+#define MAT_BG       RGB565_BGR(18, 18, 18)   
+#define MAT_OFFLINE  RGB565_BGR(66, 66, 66)   
+#define MAT_CONNECT  RGB565_BGR(67, 160, 71)  
+
+#endif
+</file>
+
+<file path="src/touch_axs5106.h">
+#ifndef TOUCH_AXS5106_H
+#define TOUCH_AXS5106_H
+
+#include <Arduino.h>
+#include <Wire.h>
+
+#define AXS5106_ADDR 0x63
+
+static bool touch_init() {
+    pinMode(47, OUTPUT);
+    digitalWrite(47, HIGH); delay(5);
+    digitalWrite(47, LOW);  delay(20);
+    digitalWrite(47, HIGH); delay(100);
+
+    Wire.begin(42, 41);
+    Wire.setClock(100000); 
+    return true;
+}
+
+static bool touch_is_pressed() {
+    Wire.beginTransmission(AXS5106_ADDR);
+    Wire.write(0x01); // Leer registro de cantidad de dedos
+    if (Wire.endTransmission() != 0) return false;
+    
+    Wire.requestFrom((uint8_t)AXS5106_ADDR, (uint8_t)1);
+    if (Wire.available()) {
+        uint8_t fingers = Wire.read();
+        return (fingers > 0 && fingers < 5); // Retorna true si detecta un dedo
+    }
+    return false;
+}
+
+static void touch_get_xy(uint16_t *x, uint16_t *y) {
+    uint8_t buf[4] = {0};
+    Wire.beginTransmission(AXS5106_ADDR);
+    Wire.write(0x02); // Iniciar la lectura de coordenadas desde X High (0x02)
+    Wire.endTransmission();
+    
+    Wire.requestFrom((uint8_t)AXS5106_ADDR, (uint8_t)4);
+    for (int i = 0; i < 4; i++) {
+        if (Wire.available()) buf[i] = Wire.read();
+    }
+    
+    *x = ((buf[0] & 0x0F) << 8) | buf[1];
+    *y = ((buf[2] & 0x0F) << 8) | buf[3];
+}
+
+#endif
+</file>
+
+<file path=".github/workflows/build.yml">
+name: Build Firmware
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: write   # <-- necesario para crear releases y subir assets
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install PlatformIO
+        run: pip install platformio
+
+      - name: Build firmware
+        run: pio run
+
+      - name: Package SD files (optional)
+        run: |
+          if [ -d sd_root ]; then
+            cd sd_root
+            tar -cvf ../sd_files.tar .
+          else
+            echo "sd_root folder not found, skipping SD package."
+          fi
+
+      - name: Create Release and Upload Assets
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            .pio/build/esp32-s3-touch-lcd-1_47/firmware.bin
+            sd_files.tar
+          fail_on_unmatched_files: false
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+</file>
+
+<file path="platformio.ini">
+[env:esp32-s3-touch-lcd-1_47]
+platform = espressif32
+board = esp32-s3-devkitc-1
+framework = arduino
+board_build.flash_mode = dio
+monitor_speed = 115200
+upload_speed = 921600
+
+lib_deps =
+    moononournation/GFX Library for Arduino @ 1.4.9
+    bitbank2/PNGdec @ ^1.0.1
+    bblanchon/ArduinoJson @ ^6.21.3
+
+build_flags =
+    -D ARDUINO_USB_CDC_ON_BOOT=1
+    -D ARDUINO_USB_MODE=1
+</file>
+
+<file path="src/main.cpp">
+// Tamagotchi-LOVE
+
+// Librerias
+#include <Arduino.h>
+#include <Arduino_GFX_Library.h>
+#include <FS.h>
+#include <SD_MMC.h>
+#include <PNGdec.h>
+#include "NetworkManager.h"
+
+// Archivos
+#include "touch_axs5106.h"
+#include "colors.h"
+#include "UI.h"
+#include "UpdateManager.h"
+
+int pngOffsetX = 0;
+int pngOffsetY = 0;
+
+#define TFT_BL 46
+
+#define SD_CLK 16
+#define SD_CMD 15
+#define SD_D0  17
+
+Arduino_DataBus *bus = new Arduino_ESP32SPI(45, 21, 38, 39);
+Arduino_GFX *gfx = new Arduino_ST7789(
+    bus, 40, 0, false,
+    172, 320,
+    34, 0,
+    34, 0);
+
+PNG png;
+uint16_t globalLineBuffer[512];
+
+void *pngOpen(const char *filename, int32_t *size) {
+  File *f = new File(SD_MMC.open(filename, "r"));
+  if (!f || !*f) return nullptr;
+  *size = f->size();
+  return (void *)f;
+}
+
+void pngClose(void *handle) {
+  File *f = (File *)handle;
+  if (f) { f->close(); delete f; }
+}
+
+int32_t pngRead(PNGFILE *handle, uint8_t *buffer, int32_t length) {
+  if (!handle) return 0;
+  File *f = (File *)handle->fHandle;
+  return f->read(buffer, length);
+}
+
+int32_t pngSeek(PNGFILE *handle, int32_t position) {
+  if (!handle) return -1;
+  File *f = (File *)handle->fHandle;
+  return f->seek(position) ? position : -1;
+}
+
+int pngDraw(PNGDRAW *pDraw) {
+  int y = pDraw->y + pngOffsetY;
+  
+  if (y >= gfx->height()) return 0; 
+  
+  int drawWidth = pDraw->iWidth;
+  
+  if (pngOffsetX + drawWidth > gfx->width()) {
+    drawWidth = gfx->width() - pngOffsetX;
+  }
+  
+  png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
+  gfx->draw16bitRGBBitmap(pngOffsetX, y, globalLineBuffer, drawWidth, 1);
+  return 1;
+}
+
+bool leerTouch(uint16_t &x, uint16_t &y) {
+  Wire.beginTransmission(0x63);
+  Wire.write(0x02);
+  Wire.endTransmission();
+  uint8_t bytesLeidos = Wire.requestFrom((uint8_t)0x63, (uint8_t)5);
+  if (bytesLeidos >= 5) {
+    uint8_t dedos = Wire.read();
+    uint8_t xh = Wire.read();
+    uint8_t xl = Wire.read();
+    uint8_t yh = Wire.read();
+    uint8_t yl = Wire.read();
+    if (dedos > 0 && dedos < 3) {
+      uint16_t raw_x = ((xh & 0x0F) << 8) | xl;
+      uint16_t raw_y = ((yh & 0x0F) << 8) | yl;
+      x = (raw_x > 172) ? 0 : (172 - raw_x);
+      y = raw_y;
+      return true;
+    }
+  }
+  return false;
+}
+
+const int MAX_IMAGES = 20;
+String imageFiles[MAX_IMAGES];
+int imageCount = 0;
+int currentImage = 0;
+bool fallbackMode = false;
+
+void drawImage(int index) {
+  if (fallbackMode || imageCount == 0 || index < 0 || index >= imageCount) return;
+
+  gfx->fillScreen(MAT_BG);
+  String fullPath = "/" + imageFiles[index];
+  int rc = png.open(fullPath.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+  if (rc == PNG_SUCCESS) {
+    png.decode(NULL, 0);
+    png.close();
+  }
+}
+
+void drawFallback() {
+  gfx->fillScreen(MAT_BG);
+  int h = gfx->height();
+  int step = h / 6;
+  uint16_t colors[] = {BGR_RED, BGR_GREEN, BGR_BLUE, BGR_YELLOW, BGR_WHITE, BGR_BLACK};
+  for (int i = 0; i < 6; i++) {
+    gfx->fillRect(0, i * step, gfx->width(), step, colors[i % 6]);
+  }
+  gfx->setTextSize(2);
+  gfx->setTextColor(BGR_WHITE, BGR_BLACK);
+}
+
+void updateFallbackCoords(uint16_t x, uint16_t y) {
+  int boxW = 160;
+  int boxH = 30;
+  int boxX = (gfx->width() - boxW) / 2;
+  int boxY = (gfx->height() - boxH) / 2;
+  gfx->fillRect(boxX, boxY, boxW, boxH, BGR_BLACK);
+  gfx->setCursor(boxX + 10, boxY + 8);
+  gfx->setTextColor(BGR_WHITE);
+  gfx->printf("Conecta la SD para comenzar", x, y);
+}
+
+// Función para verificar la SD en un bucle
+bool esperarSD() {
+  // Pantalla de espera
+  gfx->fillScreen(MAT_BG);
+  imprimirCentrado("SD", 130, 2);
+  imprimirCentrado("no detectada", 160, 2);
+  imprimirCentrado("Por favor insertela", 190, 1);
+     
+  while (true) {
+    SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
+    if (SD_MMC.begin("/sdcard", true)) {
+      // SD detectada, salir del bucle
+      return true;
+    }
+
+    delay(500);
+  }
+}
+
+void setup() {
+  Serial.begin(115200);
+  delay(1000);
+
+  // Inicialización de hardware base
+  pinMode(TFT_BL, OUTPUT);
+  digitalWrite(TFT_BL, HIGH);
+  gfx->begin();
+  bus->beginWrite();
+  bus->writeCommand(0x36);
+  bus->write(0x48); 
+  bus->endWrite();
+  touch_init();
+
+  gfx->fillScreen(MAT_BG);
+  gfx->setTextColor(BGR_WHITE); 
+  gfx->setTextSize(2);
+  imprimirCentrado("This is 4", 130, 2);
+  imprimirCentrado("u babe...", 160, 2);
+  delay(1500);
+  gfx->fillScreen(MAT_BG);
+
+
+  // 1. Espera activa por SD
+  if (esperarSD()) {
+    // Escanear archivos solo si la SD respondió
+    File root = SD_MMC.open("/");
+    File file = root.openNextFile();
+    while (file && imageCount < MAX_IMAGES) {
+      if (!file.isDirectory()) {
+        String name = file.name();
+        name.toLowerCase();
+        if (name.endsWith(".png") && name != "qr network.png") { 
+          imageFiles[imageCount++] = file.name();
+        }
+      }
+      file = root.openNextFile();
+    }
+    root.close();
+  }
+
+  // 2. Gestión de red (Solo después de haber resuelto lo de la SD)
+  inicializarRed(); 
+
+  // Verificar si hay archivos de SD pendientes de actualizar
+  if (WiFi.status() == WL_CONNECTED) {
+    performSDUpdate();
+  }
+
+  // 3. Inicio del juego
+  if (imageCount == 0) {
+    fallbackMode = true;
+    drawFallback();
+  } else {
+    fallbackMode = false;
+    currentImage = 0;
+    drawImage(0);
+  }
+}
+
+void loop() {
+  // Verificar actualizaciones periódicamente
+  static unsigned long lastUpdateCheck = 0;
+  if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    lastUpdateCheck = millis();
+    checkForUpdate();
+  }
+
+  // borrar redes si se recibe el comando "BORRAR" por el puerto serie
+  if (Serial.available() > 0) {
+    String comando = Serial.readStringUntil('\n');
+    comando.trim(); 
+
+    if (comando.equalsIgnoreCase("BORRAR")) {
+      borrarRedes();
+      delay(500);
+      ESP.restart(); 
+    }
+  }
+
+  // Manejo de gestos de deslizamiento
+  static uint16_t lastX = 0, lastY = 0;
+  static uint16_t touchStartX = 0, touchStartY = 0;
+  static bool touching = false;
+  static unsigned long lastGestureTime = 0;
+  const unsigned long GESTURE_COOLDOWN = 200; 
+
+  uint16_t x = 0, y = 0;
+  bool touched = leerTouch(x, y);
+
+  if (touched) {
+    lastX = x;
+    lastY = y;
+
+    if (!touching) {
+      touching = true;
+      touchStartX = x;
+      touchStartY = y;
+    }
+    if (fallbackMode) {
+      updateFallbackCoords(x, y);
+    }
+  } else {
+    if (touching) {
+      touching = false;
+      unsigned long now = millis();
+      if (now - lastGestureTime > GESTURE_COOLDOWN && !fallbackMode) {
+        int deltaX = (int)lastX - (int)touchStartX;
+        if (abs(deltaX) > 30) {   
+          if (deltaX > 0) {
+            currentImage = (currentImage + 1) % imageCount;
+          } else {
+            currentImage = (currentImage - 1 + imageCount) % imageCount;
+          }
+          drawImage(currentImage);
+          lastGestureTime = now;
+        }
+      }
+    }
+  }
+  // Dibujar badge de actualización si está disponible
+  if (updateAvailable && !updateInProgress) {
+    drawUpdateBadge();
+    if (touched && isTouchingBadge(x, y)) {
+      showUpdatePopup();
+    }
+  }
+    
+  delay(20);
+}
+</file>
+
+</files>

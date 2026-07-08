@@ -9,7 +9,7 @@
 
 #define GITHUB_USER "OffShur3"
 #define GITHUB_REPO "Tamagotchi_LOVE"
-#define CURRENT_VERSION_FILE "/version.txt"
+#define CURRENT_VERSION_FILE "version.txt"
 #define UPDATE_CHECK_INTERVAL 300000
 
 extern bool updateAvailable;

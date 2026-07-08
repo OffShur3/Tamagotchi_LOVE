@@ -13,6 +13,7 @@
 #include "colors.h"
 #include "UI.h"
 #include "UpdateManager.h"
+#include "PhotoCarousel.h"
 
 int pngOffsetX = 0;
 int pngOffsetY = 0;
@@ -73,6 +74,9 @@ int pngDraw(PNGDRAW *pDraw) {
   return 1;
 }
 
+// game
+PhotoCarousel* game = nullptr;
+
 bool leerTouch(uint16_t &x, uint16_t &y) {
   Wire.beginTransmission(0x63);
   Wire.write(0x02);
@@ -93,47 +97,6 @@ bool leerTouch(uint16_t &x, uint16_t &y) {
     }
   }
   return false;
-}
-
-const int MAX_IMAGES = 20;
-String imageFiles[MAX_IMAGES];
-int imageCount = 0;
-int currentImage = 0;
-bool fallbackMode = false;
-
-void drawImage(int index) {
-  if (fallbackMode || imageCount == 0 || index < 0 || index >= imageCount) return;
-
-  gfx->fillScreen(MAT_BG);
-  String fullPath = "/" + imageFiles[index];
-  int rc = png.open(fullPath.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw);
-  if (rc == PNG_SUCCESS) {
-    png.decode(NULL, 0);
-    png.close();
-  }
-}
-
-void drawFallback() {
-  gfx->fillScreen(MAT_BG);
-  int h = gfx->height();
-  int step = h / 6;
-  uint16_t colors[] = {BGR_RED, BGR_GREEN, BGR_BLUE, BGR_YELLOW, BGR_WHITE, BGR_BLACK};
-  for (int i = 0; i < 6; i++) {
-    gfx->fillRect(0, i * step, gfx->width(), step, colors[i % 6]);
-  }
-  gfx->setTextSize(2);
-  gfx->setTextColor(BGR_WHITE, BGR_BLACK);
-}
-
-void updateFallbackCoords(uint16_t x, uint16_t y) {
-  int boxW = 160;
-  int boxH = 30;
-  int boxX = (gfx->width() - boxW) / 2;
-  int boxY = (gfx->height() - boxH) / 2;
-  gfx->fillRect(boxX, boxY, boxW, boxH, BGR_BLACK);
-  gfx->setCursor(boxX + 10, boxY + 8);
-  gfx->setTextColor(BGR_WHITE);
-  gfx->printf("Conecta la SD para comenzar", x, y);
 }
 
 // Función para verificar la SD en un bucle
@@ -169,45 +132,28 @@ void setup() {
   bus->endWrite();
   touch_init();
 
+  // Pantalla de bienvenida
   gfx->fillScreen(MAT_BG);
-  gfx->setTextColor(BGR_WHITE); 
+  gfx->setTextColor(BGR_WHITE);
   gfx->setTextSize(2);
   imprimirCentrado("This is 4", 130, 2);
   imprimirCentrado("u babe...", 160, 2);
   delay(1500);
-  gfx->fillScreen(MAT_BG);
 
+  // 1. Esperar a que la SD esté disponible
+  esperarSD();
 
-  // 1. Espera activa por SD
-  if (esperarSD()) {
-    // Escanear archivos solo si la SD respondió
-    File root = SD_MMC.open("/");
-    File file = root.openNextFile();
-    while (file && imageCount < MAX_IMAGES) {
-      if (!file.isDirectory()) {
-        String name = file.name();
-        name.toLowerCase();
-        if (name.endsWith(".png") && name != "qr network.png") { 
-          imageFiles[imageCount++] = file.name();
-        }
-      }
-      file = root.openNextFile();
-    }
-    root.close();
-  }
-
-  // 3. Inicio del juego
-  if (imageCount == 0) {
-    fallbackMode = true;
-    drawFallback();
-  } else {
-    fallbackMode = false;
-    currentImage = 0;
-    drawImage(0);
-  }
+  // 2. Crear el juego e inicializarlo
+  game = new PhotoCarousel(gfx, &png, pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+  game->init();
 }
 
 void loop() {
+  // Leer touch al inicio (necesario para badge y juego)
+  uint16_t x = 0, y = 0;
+  bool touched = leerTouch(x, y);
+
+
   // 1. Intentar conectar WiFi en segundo plano (sin bloquear)
   static unsigned long lastWiFiAttempt = 0;
   if (!redConfigurada && millis() - lastWiFiAttempt > 10000) { // cada 10 segundos
@@ -249,46 +195,6 @@ void loop() {
     }
   }
 
-  // Manejo de gestos de deslizamiento
-  static uint16_t lastX = 0, lastY = 0;
-  static uint16_t touchStartX = 0, touchStartY = 0;
-  static bool touching = false;
-  static unsigned long lastGestureTime = 0;
-  const unsigned long GESTURE_COOLDOWN = 200; 
-
-  uint16_t x = 0, y = 0;
-  bool touched = leerTouch(x, y);
-
-  if (touched) {
-    lastX = x;
-    lastY = y;
-
-    if (!touching) {
-      touching = true;
-      touchStartX = x;
-      touchStartY = y;
-    }
-    if (fallbackMode) {
-      updateFallbackCoords(x, y);
-    }
-  } else {
-    if (touching) {
-      touching = false;
-      unsigned long now = millis();
-      if (now - lastGestureTime > GESTURE_COOLDOWN && !fallbackMode) {
-        int deltaX = (int)lastX - (int)touchStartX;
-        if (abs(deltaX) > 30) {   
-          if (deltaX > 0) {
-            currentImage = (currentImage + 1) % imageCount;
-          } else {
-            currentImage = (currentImage - 1 + imageCount) % imageCount;
-          }
-          drawImage(currentImage);
-          lastGestureTime = now;
-        }
-      }
-    }
-  }
   // Dibujar badge de actualización si está disponible
   if (updateAvailable && !updateInProgress) {
     drawUpdateBadge();
@@ -296,6 +202,11 @@ void loop() {
       esperarSoltar();
       showUpdatePopup();
     }
+  }
+
+  // JUEGO
+  if (game) {
+    game->update(x, y, touched);
   }
     
   delay(20);

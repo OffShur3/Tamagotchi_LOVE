@@ -7,6 +7,7 @@
 
 // Referencia al objeto global de la pantalla
 extern Arduino_GFX *gfx;
+extern bool leerTouch(uint16_t &x, uint16_t &y); 
 
 // Prototipos de funciones de interfaz
 void imprimirCentrado(String texto, int y, int size);

@@ -10,6 +10,16 @@ void imprimirCentrado(String texto, int y, int size) {
     gfx->println(texto);
 }
 
+// --------------- Esperar a que el usuario suelte el dedo ---------------
+void esperarSoltar() {
+    uint16_t tx, ty;
+    while (leerTouch(tx, ty)) {
+        delay(10);
+    }
+    delay(100); // Pequeño margen de seguridad
+}
+
+
 void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String texto, int textSize, uint16_t colorTexto) {
     // 1. Dibujar el cuerpo del botón
     gfx->fillRoundRect(x, y, w, h, r, colorFondo);

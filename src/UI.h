@@ -11,5 +11,7 @@ extern Arduino_GFX *gfx;
 // Prototipos de funciones de interfaz
 void imprimirCentrado(String texto, int y, int size);
 void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String texto, int textSize, uint16_t colorTexto);
+void esperarSoltar();
+
 
 #endif

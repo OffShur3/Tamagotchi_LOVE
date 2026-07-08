@@ -106,7 +106,6 @@ bool isTouchingBadge(uint16_t x, uint16_t y) {
     }
     return tocando;
 }
-
 // --------------- Popup de actualización ---------------
 void showUpdatePopup() {
     Serial.println("[UPDATE] Mostrando popup de nueva versión");
@@ -128,6 +127,9 @@ void showUpdatePopup() {
     dibujarBoton(20, 155, 132, 35, 8, MAT_CONNECT, "Actualizar", 1, BGR_WHITE);
     dibujarBoton(20, 200, 132, 35, 8, MAT_OFFLINE, "Mas tarde", 1, BGR_WHITE);
 
+    // Esperar a que suelte antes de empezar a detectar
+    esperarSoltar();
+
     uint16_t tx, ty;
     while (true) {
         if (leerTouch(tx, ty)) {
@@ -135,11 +137,13 @@ void showUpdatePopup() {
 
             if (tx >= 20 && tx <= 152 && ty >= 155 && ty <= 190) {
                 Serial.println("[UPDATE] Botón 'Actualizar' presionado");
+                esperarSoltar();
                 showConfirmPopup();
                 return;
             }
             if (tx >= 20 && tx <= 152 && ty >= 200 && ty <= 235) {
                 Serial.println("[UPDATE] Botón 'Más tarde' presionado");
+                esperarSoltar();
                 updateAvailable = false;
                 return;
             }
@@ -164,6 +168,9 @@ void showConfirmPopup() {
     dibujarBoton(20, 170, 55, 35, 8, MAT_CONNECT, "Si", 1, BGR_WHITE);
     dibujarBoton(97, 170, 55, 35, 8, MAT_OFFLINE, "No", 1, BGR_WHITE);
 
+    // Esperar a que suelte antes de empezar a detectar
+    esperarSoltar();
+
     uint16_t tx, ty;
     while (true) {
         if (leerTouch(tx, ty)) {
@@ -171,11 +178,13 @@ void showConfirmPopup() {
 
             if (tx >= 20 && tx <= 75 && ty >= 170 && ty <= 205) {
                 Serial.println("[UPDATE] Botón 'Sí' presionado - INICIANDO OTA");
+                esperarSoltar();
                 performFirmwareUpdate();
                 return;
             }
             if (tx >= 97 && tx <= 152 && ty >= 170 && ty <= 205) {
                 Serial.println("[UPDATE] Botón 'No' presionado");
+                esperarSoltar();
                 updateAvailable = false;
                 return;
             }

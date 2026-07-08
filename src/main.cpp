@@ -294,6 +294,7 @@ void loop() {
   if (updateAvailable && !updateInProgress) {
     drawUpdateBadge();
     if (touched && isTouchingBadge(x, y)) {
+      esperarSoltar();
       showUpdatePopup();
     }
   }

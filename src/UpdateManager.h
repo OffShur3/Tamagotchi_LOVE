@@ -26,5 +26,8 @@ void performSDUpdate();
 String getCurrentVersion();
 void extractTar(const char* tarPath, const char* destDir);
 void updateVersionFile();
+void performFullUpdate();                  // Actualización completa (SD + OTA)
+void drawProgressScreen(String title, int progress, int total); // UI de progreso
+bool needMandatoryUpdate();               // Verifica si es obligatorio actualizar
 
 #endif

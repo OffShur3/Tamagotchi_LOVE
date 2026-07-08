@@ -535,3 +535,183 @@ void updateVersionFile() {
         Serial.printf("[SD] ERROR: No se pudo escribir %s\n", CURRENT_VERSION_FILE);
     }
 }
+
+// --------------- Verificar si necesita actualización obligatoria ---------------
+bool needMandatoryUpdate() {
+    // Si no hay version.txt, actualización obligatoria
+    if (!SD_MMC.exists(CURRENT_VERSION_FILE)) {
+        Serial.println("[UPDATE] No hay version.txt - Actualización obligatoria");
+        return true;
+    }
+    
+    // Si no hay archivos PNG esenciales, también forzar
+    if (!SD_MMC.exists("/QR Network.png")) {
+        Serial.println("[UPDATE] Faltan archivos SD - Actualización obligatoria");
+        return true;
+    }
+    
+    // Si la versión actual es diferente de la latest (si ya se consultó)
+    String current = getCurrentVersion();
+    if (latestVersion != "" && current != latestVersion) {
+        Serial.println("[UPDATE] Versión desactualizada - Actualización obligatoria");
+        return true;
+    }
+    
+    return false;
+}
+
+// --------------- Pantalla de progreso genérica ---------------
+void drawProgressScreen(String title, int progress, int total) {
+    gfx->fillScreen(MAT_BG);
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    imprimirCentrado(title, 80, 1);
+    
+    // Barra de progreso
+    int barWidth = 132;
+    int barHeight = 20;
+    int barX = 20;
+    int barY = 120;
+    
+    gfx->drawRect(barX, barY, barWidth, barHeight, BGR_WHITE);
+    
+    if (total > 0) {
+        int filled = (barWidth - 4) * progress / total;
+        gfx->fillRect(barX + 2, barY + 2, filled, barHeight - 4, MAT_CONNECT);
+    }
+    
+    // Porcentaje
+    gfx->setCursor(70, 150);
+    gfx->setTextColor(BGR_WHITE);
+    if (total > 0) {
+        gfx->printf("%d%%", (progress * 100) / total);
+    } else {
+        gfx->print("...");
+    }
+}
+
+// --------------- Actualización completa (SD + OTA) ---------------
+void performFullUpdate() {
+    updateInProgress = true;
+    String current = getCurrentVersion();
+    
+    // Si no tenemos latestVersion, obtenerla
+    if (latestVersion == "") {
+        // Llamada rápida a checkForUpdate solo para obtener latestVersion
+        HTTPClient http;
+        http.setTimeout(10000);
+        String url = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
+        http.begin(url);
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        http.addHeader("User-Agent", "Tamagotchi-ESP32");
+        int httpCode = http.GET();
+        if (httpCode == 200) {
+            String payload = http.getString();
+            int tagPos = payload.indexOf("\"tag_name\":\"");
+            if (tagPos != -1) {
+                tagPos += 12;
+                int tagEnd = payload.indexOf("\"", tagPos);
+                latestVersion = payload.substring(tagPos, tagEnd);
+            }
+        }
+        http.end();
+    }
+    
+    // ===== PASO 1: Descargar y actualizar SD =====
+    drawProgressScreen("Descargando SD...", 0, 1);
+    
+    String sdUrl = getAssetUrl("sd_files.tar");
+    if (sdUrl != "") {
+        HTTPClient http;
+        http.setTimeout(30000);
+        http.begin(sdUrl);
+        http.addHeader("User-Agent", "Tamagotchi-ESP32");
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        
+        int code = http.GET();
+        if (code == 200) {
+            int contentLength = http.getSize();
+            WiFiClient *stream = http.getStreamPtr();
+            File tarFile = SD_MMC.open("/update.tar", "w");
+            
+            if (tarFile) {
+                uint8_t buffer[256];
+                int downloaded = 0;
+                
+                while (http.connected() && downloaded < contentLength) {
+                    size_t available = stream->available();
+                    if (available) {
+                        int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
+                        tarFile.write(buffer, bytesRead);
+                        downloaded += bytesRead;
+                        
+                        if (contentLength > 0) {
+                            drawProgressScreen("Descargando SD...", downloaded, contentLength);
+                        }
+                    }
+                    yield();
+                }
+                tarFile.close();
+                http.end();
+                
+                // Extraer TAR
+                drawProgressScreen("Actualizando SD...", 0, 1);
+                extractTar("/update.tar", "/");
+                SD_MMC.remove("/update.tar");
+            } else {
+                http.end();
+            }
+        } else {
+            http.end();
+        }
+    }
+    
+    // ===== PASO 2: Actualizar version.txt =====
+    updateVersionFile();
+    
+    // ===== PASO 3: Descargar y aplicar OTA =====
+    drawProgressScreen("Descargando firmware...", 0, 1);
+    
+    String fwUrl = getAssetUrl("firmware.bin");
+    if (fwUrl != "") {
+        HTTPClient http;
+        http.begin(fwUrl);
+        http.addHeader("User-Agent", "Tamagotchi-ESP32");
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        
+        int code = http.GET();
+        if (code == 200) {
+            int contentLength = http.getSize();
+            
+            if (Update.begin(contentLength)) {
+                WiFiClient *stream = http.getStreamPtr();
+                uint8_t buffer[512];
+                int bytesWritten = 0;
+                
+                while (http.connected() && bytesWritten < contentLength) {
+                    size_t available = stream->available();
+                    if (available) {
+                        int bytesRead = stream->readBytes(buffer, min((size_t)512, available));
+                        Update.write(buffer, bytesRead);
+                        bytesWritten += bytesRead;
+                        
+                        if (contentLength > 0) {
+                            drawProgressScreen("Descargando firmware...", bytesWritten, contentLength);
+                        }
+                    }
+                    yield();
+                }
+                http.end();
+                
+                if (Update.end()) {
+                    drawProgressScreen("Actualizado! Reiniciando...", 1, 1);
+                    delay(2000);
+                    ESP.restart();
+                }
+            }
+            http.end();
+        }
+    }
+    
+    updateInProgress = false;
+}

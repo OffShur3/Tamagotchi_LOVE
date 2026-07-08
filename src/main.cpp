@@ -211,29 +211,24 @@ void setup() {
 }
 
 void loop() {
-  // Actualización de SD pendiente (solo una vez al inicio)
-  static bool sdChecked = false;
-  if (!sdChecked && WiFi.status() == WL_CONNECTED) {
-    sdChecked = true;
-    Serial.println("[MAIN] Verificando actualización de SD por primera vez...");
-    performSDUpdate();
+  // Actualización obligatoria al inicio (solo una vez)
+  static bool mandatoryUpdateDone = false;
+  if (!mandatoryUpdateDone && WiFi.status() == WL_CONNECTED) {
+    mandatoryUpdateDone = true;
+    if (needMandatoryUpdate()) {
+      Serial.println("[MAIN] Iniciando actualización obligatoria...");
+      performFullUpdate();
+      // Si performFullUpdate no reinicia, continuar
+    } else {
+      Serial.println("[MAIN] No se requiere actualización obligatoria");
+    }
   }
 
-  // Verificar actualizaciones periódicamente
+  // Verificar actualizaciones periódicamente (solo si no hay actualización en progreso)
   static unsigned long lastUpdateCheck = 0;
-  static bool firstCheckDone = false;
-  
-  // Primer check inmediato cuando tengamos WiFi y SD actualizada
-  if (!firstCheckDone && WiFi.status() == WL_CONNECTED && sdChecked) {
-    firstCheckDone = true;
-    Serial.println("[MAIN] Primera verificación de actualización...");
-    checkForUpdate();
-    lastUpdateCheck = millis();
-  }
-  
-  // Checks periódicos con backoff si hay errores
-  if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
-    Serial.println("[MAIN] Iniciando verificación de actualizaciones...");
+  if (WiFi.status() == WL_CONNECTED && !updateInProgress && 
+      millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
+    Serial.println("[MAIN] Verificando actualizaciones...");
     lastUpdateCheck = millis();
     checkForUpdate();
   }

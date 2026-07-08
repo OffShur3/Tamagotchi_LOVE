@@ -466,6 +466,12 @@ void extractTar(const char* tarPath, const char* destDir) {
         memcpy(name, header, 100);
         name[100] = 0;
         
+        // Limpiar prefijo "./" que agrega tar
+        char* cleanName = name;
+        if (strncmp(cleanName, "./", 2) == 0) {
+            cleanName += 2;
+        }
+        
         // Extraer tamaño (bytes 124-135, octal)
         char sizeStr[13];
         memcpy(sizeStr, header + 124, 12);
@@ -475,7 +481,7 @@ void extractTar(const char* tarPath, const char* destDir) {
         // Tipo (byte 156)
         char typeflag = header[156];
 
-        String filename = String(destDir) + String(name);
+        String filename = String(destDir) + String(cleanName);
 
         if (typeflag == '5') {
             Serial.printf("[TAR] Directorio: %s\n", filename.c_str());

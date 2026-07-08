@@ -25,12 +25,7 @@ const char HTML_HEADER[] PROGMEM =
 bool redConfigurada = false; // Definición inicial
 
 void inicializarRed() {
-    // Si ya configuramos la red, no volvemos a pasar por este proceso
     if (redConfigurada) return;
-
-    gfx->fillScreen(MAT_BG);
-    gfx->setTextColor(BGR_WHITE);
-    imprimirCentrado("Conectando...", 150, 2);
 
     preferences.begin("wifi-config", false);
     int netCount = preferences.getInt("netCount", 0);
@@ -41,45 +36,21 @@ void inicializarRed() {
             String passKey = "pass" + String(i);
             String s = preferences.getString(ssidKey.c_str(), "");
             String p = preferences.getString(passKey.c_str(), "");
-            
             if (s != "") {
                 wifiMulti.addAP(s.c_str(), p.c_str());
             }
         }
         preferences.end();
 
-        int intentos = 0;
-        while (wifiMulti.run() != WL_CONNECTED && intentos < 20) {
-            delay(500);
-            intentos++;
-        }
-
+        // Intentar conectar sin bloquear la pantalla
+        WiFi.mode(WIFI_STA);
+        wifiMulti.run(); // Intenta conectar una vez, no se queda trabado
         if (WiFi.status() == WL_CONNECTED) {
-            gfx->fillScreen(MAT_BG);
-            gfx->setTextColor(BGR_GREEN);
-            imprimirCentrado("Online!", 150, 2);
-            delay(1500);
             redConfigurada = true;
-            return;
+            Serial.println("[WiFi] Conectado correctamente en segundo plano");
         }
-    }
-    preferences.end();
-
-    // Bucle de menú hasta que el usuario decida
-    while (true) {
-        if (!pantallaOpcionRed()) {   // Eligió Offline
-            redConfigurada = true;
-            return;
-        }
-        // Eligió Conectar → abrir portal
-        bool conectado = iniciarPortalCautivo();
-        if (conectado) {
-            // Esto realmente no se alcanzará porque guardarCredenciales()
-            // hace ESP.restart(), pero dejamos la lógica clara.
-            redConfigurada = true;
-            return;
-        }
-        // Si se canceló (gesto), el bucle repite el menú automáticamente
+    } else {
+        preferences.end();
     }
 }
 

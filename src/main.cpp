@@ -196,9 +196,6 @@ void setup() {
     root.close();
   }
 
-  // 2. Gestión de red (Solo después de haber resuelto lo de la SD)
-  inicializarRed(); 
-
   // 3. Inicio del juego
   if (imageCount == 0) {
     fallbackMode = true;
@@ -211,6 +208,13 @@ void setup() {
 }
 
 void loop() {
+  // 1. Intentar conectar WiFi en segundo plano (sin bloquear)
+  static unsigned long lastWiFiAttempt = 0;
+  if (!redConfigurada && millis() - lastWiFiAttempt > 10000) { // cada 10 segundos
+    lastWiFiAttempt = millis();
+    inicializarRed();
+  }
+
   // Actualización obligatoria al inicio (solo una vez)
   static bool mandatoryUpdateDone = false;
   if (!mandatoryUpdateDone && WiFi.status() == WL_CONNECTED) {

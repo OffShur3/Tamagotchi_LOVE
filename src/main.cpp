@@ -221,6 +221,17 @@ void loop() {
 
   // Verificar actualizaciones periódicamente
   static unsigned long lastUpdateCheck = 0;
+  static bool firstCheckDone = false;
+  
+  // Primer check inmediato cuando tengamos WiFi y SD actualizada
+  if (!firstCheckDone && WiFi.status() == WL_CONNECTED && sdChecked) {
+    firstCheckDone = true;
+    Serial.println("[MAIN] Primera verificación de actualización...");
+    checkForUpdate();
+    lastUpdateCheck = millis();
+  }
+  
+  // Checks periódicos con backoff si hay errores
   if (WiFi.status() == WL_CONNECTED && millis() - lastUpdateCheck > UPDATE_CHECK_INTERVAL) {
     Serial.println("[MAIN] Iniciando verificación de actualizaciones...");
     lastUpdateCheck = millis();

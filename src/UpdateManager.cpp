@@ -1,33 +1,15 @@
+// Librerias
 #include "UpdateManager.h"
 #include "NetworkManager.h"
+#include <ArduinoJson.h>
+
+// Archivos
 #include "colors.h"
 #include "UI.h"
-#include <ArduinoJson.h>
 
 bool updateAvailable = false;
 String latestVersion = "";
 bool updateInProgress = false;
-
-// --------------- Estructura para parsear TAR ---------------
-struct TarHeader {
-    char name[100];
-    char mode[8];
-    char uid[8];
-    char gid[8];
-    char size[12];
-    char mtime[12];
-    char chksum[8];
-    char typeflag;
-    char linkname[100];
-    char magic[6];
-    char version[2];
-    char uname[32];
-    char gname[32];
-    char devmajor[8];
-    char devminor[8];
-    char prefix[155];
-    char padding[12];
-};
 
 // --------------- Verificar actualización desde GitHub ---------------
 bool checkForUpdate() {
@@ -44,29 +26,33 @@ bool checkForUpdate() {
     Serial.printf("[UPDATE] Consultando: %s\n", url.c_str());
 
     http.begin(url);
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
     http.addHeader("User-Agent", "Tamagotchi-ESP32");
 
     int httpCode = http.GET();
     Serial.printf("[UPDATE] HTTP code: %d\n", httpCode);
 
     if (httpCode != 200) {
-        Serial.println("[UPDATE] Error HTTP, saliendo");
+        Serial.printf("[UPDATE] Error HTTP %d, saliendo\n", httpCode);
         http.end();
         return false;
     }
 
+    // Obtener el payload
     String payload = http.getString();
     http.end();
-    Serial.printf("[UPDATE] Respuesta (%d bytes): %s\n", payload.length(), payload.substring(0, 200).c_str());
+    Serial.printf("[UPDATE] Respuesta recibida (%d bytes)\n", payload.length());
 
-    StaticJsonDocument<2048> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (error) {
-        Serial.printf("[UPDATE] Error JSON: %s\n", error.c_str());
+    // Buscar tag_name manualmente (sin JSON parser, para evitar problemas de memoria)
+    int tagPos = payload.indexOf("\"tag_name\":\"");
+    if (tagPos == -1) {
+        Serial.println("[UPDATE] ERROR: No se encontró tag_name");
         return false;
     }
-
-    latestVersion = doc["tag_name"].as<String>();
+    
+    tagPos += 12; // longitud de "tag_name":"
+    int tagEnd = payload.indexOf("\"", tagPos);
+    latestVersion = payload.substring(tagPos, tagEnd);
     Serial.printf("[UPDATE] Latest version en GitHub: %s\n", latestVersion.c_str());
 
     String current = getCurrentVersion();
@@ -82,18 +68,17 @@ bool checkForUpdate() {
     return false;
 }
 
+
 // --------------- Leer versión actual ---------------
 String getCurrentVersion() {
-    Serial.println("[UPDATE] Leyendo versión actual de la SD...");
-
     if (!SD_MMC.exists(CURRENT_VERSION_FILE)) {
-        Serial.println("[UPDATE] /version.txt no existe, devolviendo v0.0.0");
+        Serial.println("[UPDATE] version.txt no existe, devolviendo v0.0.0");
         return "v0.0.0";
     }
 
     File file = SD_MMC.open(CURRENT_VERSION_FILE, "r");
     if (!file) {
-        Serial.println("[UPDATE] Error al abrir /version.txt");
+        Serial.println("[UPDATE] Error al abrir version.txt");
         return "v0.0.0";
     }
 
@@ -200,48 +185,63 @@ void showConfirmPopup() {
 }
 
 // --------------- Obtener URL de asset desde GitHub API ---------------
-String getAssetUrl(String assetName) {
-    Serial.printf("[UPDATE] Buscando asset '%s'...\n", assetName.c_str());
+String getAssetUrl(const char* assetName) {
+    Serial.printf("[UPDATE] Buscando asset '%s'...\n", assetName);
 
-    HTTPClient *http = new HTTPClient();
+    HTTPClient http;
+    http.setTimeout(10000);
     String apiUrl = "https://api.github.com/repos/" + String(GITHUB_USER) + "/" + String(GITHUB_REPO) + "/releases/latest";
-    http->begin(apiUrl);
-    http->addHeader("User-Agent", "Tamagotchi-ESP32");
-    http->setTimeout(10000);
+    http.begin(apiUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-    int code = http->GET();
+
+    int code = http.GET();
     Serial.printf("[UPDATE] API status: %d\n", code);
     if (code != 200) {
-        http->end();
-        delete http;
+        http.end();
         return "";
     }
 
-    String payload = http->getString();
-    http->end();
-    delete http;
-
-    StaticJsonDocument<4096> doc;
-    DeserializationError error = deserializeJson(doc, payload);
-    if (error) {
-        Serial.printf("[UPDATE] JSON error: %s\n", error.c_str());
-        return "";
-    }
-
-    JsonArray assets = doc["assets"].as<JsonArray>();
-    Serial.printf("[UPDATE] %d assets encontrados\n", assets.size());
-
-    for (JsonObject asset : assets) {
-        const char* name = asset["name"].as<const char*>();
-        Serial.printf("[UPDATE]   - %s\n", name);
-        if (String(name) == assetName) {
-            String url = asset["browser_download_url"].as<String>();
-            Serial.printf("[UPDATE] URL encontrada: %s\n", url.c_str());
-            return url;
+    // Leer el payload por partes para no cargar todo en RAM
+    // Buscar "browser_download_url" manualmente
+    String result = "";
+    WiFiClient *stream = http.getStreamPtr();
+    
+    // Leer todo el body
+    String body = "";
+    while (http.connected()) {
+        size_t available = stream->available();
+        if (available) {
+            uint8_t buf[256];
+            int read = stream->readBytes(buf, min((size_t)256, available));
+            body += String((char*)buf).substring(0, read);
         }
+        if (body.length() > 10000) break; // Seguridad
     }
-    Serial.printf("[UPDATE] Asset '%s' NO encontrado\n", assetName.c_str());
-    return "";
+    http.end();
+
+    // Buscar el asset por nombre
+    int assetPos = body.indexOf(String("\"name\":\"") + assetName + "\"");
+    if (assetPos == -1) {
+        Serial.printf("[UPDATE] Asset '%s' NO encontrado\n", assetName);
+        return "";
+    }
+
+    // Buscar browser_download_url cerca de ese asset
+    int urlPos = body.indexOf("\"browser_download_url\":\"", assetPos);
+    if (urlPos == -1) {
+        Serial.println("[UPDATE] URL no encontrada");
+        return "";
+    }
+    
+    urlPos += 24; // longitud de "browser_download_url":"
+    int urlEnd = body.indexOf("\"", urlPos);
+    result = body.substring(urlPos, urlEnd);
+    result.replace("\\/", "/"); // GitHub escapa las / en JSON
+    
+    Serial.printf("[UPDATE] URL encontrada: %s\n", result.c_str());
+    return result;
 }
 
 // --------------- Aplicar OTA ---------------
@@ -256,7 +256,7 @@ void performFirmwareUpdate() {
 
     String downloadUrl = getAssetUrl("firmware.bin");
     if (downloadUrl == "") {
-        Serial.println("[OTA] ERROR: firmware.bin no encontrado en assets");
+        Serial.println("[OTA] ERROR: firmware.bin no encontrado");
         gfx->setTextColor(BGR_RED);
         imprimirCentrado("Firmware no encontrado", 130, 1);
         delay(2000);
@@ -267,6 +267,7 @@ void performFirmwareUpdate() {
     HTTPClient http;
     http.begin(downloadUrl);
     http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); 
 
     int code = http.GET();
     Serial.printf("[OTA] Descarga firmware.bin, HTTP code: %d\n", code);
@@ -308,7 +309,7 @@ void performFirmwareUpdate() {
             int newProgress = (bytesWritten * 100) / contentLength;
             if (newProgress != progress) {
                 progress = newProgress;
-                Serial.printf("[OTA] Progreso: %d%% (%d/%d)\n", progress, bytesWritten, contentLength);
+                Serial.printf("[OTA] Progreso: %d%%\n", progress);
                 gfx->fillRect(20, 150, 132, 20, MAT_BG);
                 gfx->drawRect(20, 150, 132, 20, BGR_WHITE);
                 gfx->fillRect(22, 152, (128 * progress) / 100, 16, MAT_CONNECT);
@@ -317,14 +318,14 @@ void performFirmwareUpdate() {
                 gfx->printf("%d%%", progress);
             }
         }
-        delay(10);
+        yield();
     }
 
     http.end();
     Serial.printf("[OTA] Bytes escritos: %d / %d\n", bytesWritten, contentLength);
 
     if (Update.end()) {
-        Serial.println("[OTA] ¡Update.end() exitoso! Guardando versión...");
+        Serial.println("[OTA] ¡Update.end() exitoso!");
         File file = SD_MMC.open(CURRENT_VERSION_FILE, "w");
         if (file) {
             file.println(latestVersion);
@@ -361,9 +362,6 @@ void performSDUpdate() {
     String latest = latestVersion;
     if (latest == "") latest = current;
 
-    Serial.printf("[SD] Versión actual SD: %s\n", current.c_str());
-    Serial.printf("[SD] Versión firmware: %s\n", latest.c_str());
-
     if (current == latest && latest != "v0.0.0") {
         Serial.println("[SD] SD ya está actualizada");
         return;
@@ -376,53 +374,49 @@ void performSDUpdate() {
 
     String downloadUrl = getAssetUrl("sd_files.tar");
     if (downloadUrl == "") {
-        Serial.println("[SD] No se encontró sd_files.tar, solo actualizando version.txt");
+        Serial.println("[SD] No se encontró sd_files.tar, actualizando version.txt");
         updateVersionFile();
         return;
     }
 
-    // Usar HTTPClient en el heap
-    HTTPClient *http = new HTTPClient();
-    http->begin(downloadUrl);
-    http->addHeader("User-Agent", "Tamagotchi-ESP32");
-    http->setTimeout(30000);
+    HTTPClient http;
+    http.setTimeout(30000);
+    http.begin(downloadUrl);
+    http.addHeader("User-Agent", "Tamagotchi-ESP32");
+    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
-    int code = http->GET();
+    int code = http.GET();
     Serial.printf("[SD] Descarga sd_files.tar, HTTP code: %d\n", code);
     if (code != 200) {
-        http->end();
-        delete http;
+        http.end();
         Serial.println("[SD] ERROR: Falló la descarga del TAR");
         return;
     }
 
-    WiFiClient *stream = http->getStreamPtr();
+    WiFiClient *stream = http.getStreamPtr();
     File tarFile = SD_MMC.open("/update.tar", "w");
     if (!tarFile) {
-        http->end();
-        delete http;
+        http.end();
         Serial.println("[SD] ERROR: No se pudo crear /update.tar");
         return;
     }
 
-    // Buffer pequeño en stack, procesamiento por chunks
     uint8_t buffer[256];
-    int contentLength = http->getSize();
+    int contentLength = http.getSize();
     int downloaded = 0;
     Serial.printf("[SD] Descargando TAR (%d bytes)...\n", contentLength);
 
-    while (http->connected() && downloaded < contentLength) {
+    while (http.connected() && downloaded < contentLength) {
         size_t available = stream->available();
         if (available) {
             int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
             tarFile.write(buffer, bytesRead);
             downloaded += bytesRead;
         }
-        yield(); // Permitir que el watchdog respire
+        yield();
     }
     tarFile.close();
-    http->end();
-    delete http;
+    http.end();
     Serial.printf("[SD] TAR descargado: %d bytes\n", downloaded);
 
     Serial.println("[SD] Extrayendo TAR...");
@@ -447,28 +441,34 @@ void extractTar(const char* tarPath, const char* destDir) {
 
     Serial.printf("[TAR] Abriendo %s (%d bytes)\n", tarPath, tarFile.size());
 
-    TarHeader header;
+    // Leer header (512 bytes)
+    uint8_t header[512];
     int fileCount = 0;
 
-    while (tarFile.read((uint8_t*)&header, sizeof(TarHeader)) == sizeof(TarHeader)) {
-        if (header.name[0] == 0) {
+    while (tarFile.read(header, 512) == 512) {
+        // Verificar si el header está vacío (fin del archivo)
+        if (header[0] == 0) {
             Serial.println("[TAR] Fin del archivo (header vacío)");
             break;
         }
 
-        // Calcular tamaño del archivo (en octal)
-        size_t fileSize = 0;
-        for (int i = 0; i < 11 && header.size[i] != 0 && header.size[i] != ' '; i++) {
-            if (header.size[i] >= '0' && header.size[i] <= '7') {
-                fileSize = fileSize * 8 + (header.size[i] - '0');
-            }
-        }
+        // Extraer nombre (bytes 0-99)
+        char name[101];
+        memcpy(name, header, 100);
+        name[100] = 0;
+        
+        // Extraer tamaño (bytes 124-135, octal)
+        char sizeStr[13];
+        memcpy(sizeStr, header + 124, 12);
+        sizeStr[12] = 0;
+        size_t fileSize = strtoul(sizeStr, NULL, 8);
 
-        String filename = String(destDir) + String(header.name);
-        // Limpiar caracteres nulos
-        filename.replace("\0", "");
+        // Tipo (byte 156)
+        char typeflag = header[156];
 
-        if (header.typeflag == '5') {
+        String filename = String(destDir) + String(name);
+
+        if (typeflag == '5') {
             Serial.printf("[TAR] Directorio: %s\n", filename.c_str());
             if (!SD_MMC.exists(filename)) {
                 SD_MMC.mkdir(filename);
@@ -483,11 +483,11 @@ void extractTar(const char* tarPath, const char* destDir) {
 
             File outFile = SD_MMC.open(filename, "w");
             if (outFile) {
-                uint8_t buf[512];
+                uint8_t buf[256];
                 size_t remaining = fileSize;
 
                 while (remaining > 0) {
-                    size_t toRead = min((size_t)512, remaining);
+                    size_t toRead = min((size_t)256, remaining);
                     size_t read = tarFile.read(buf, toRead);
                     if (read == 0) break;
                     outFile.write(buf, read);
@@ -497,6 +497,7 @@ void extractTar(const char* tarPath, const char* destDir) {
                 Serial.printf("[TAR]   -> OK\n");
             } else {
                 Serial.printf("[TAR]   -> ERROR al crear archivo\n");
+                // Saltar datos
                 tarFile.seek(tarFile.position() + fileSize);
             }
         }

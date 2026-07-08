@@ -9,8 +9,8 @@
 
 #define GITHUB_USER "OffShur3"
 #define GITHUB_REPO "Tamagotchi_LOVE"
-#define CURRENT_VERSION_FILE "version.txt"
-#define UPDATE_CHECK_INTERVAL 10000  // 10 segundos para pruebas
+#define CURRENT_VERSION_FILE "/version.txt"
+#define UPDATE_CHECK_INTERVAL 300000  // 30 segundos para pruebas
 
 extern bool updateAvailable;
 extern String latestVersion;

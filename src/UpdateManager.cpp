@@ -573,7 +573,7 @@ bool needMandatoryUpdate() {
 }
 
 // --------------- Pantalla de progreso genérica ---------------
-void drawProgressScreen(const String& title, int progress, int total, bool redrawAll = false) {
+void drawProgressScreen(const String& title, int progress, int total, bool redrawAll) {
     static String lastTitle = "";
     if (redrawAll || lastTitle != title) {
         gfx->fillScreen(MAT_BG);

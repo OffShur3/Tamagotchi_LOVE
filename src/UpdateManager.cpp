@@ -450,12 +450,10 @@ void extractTar(const char* tarPath, const char* destDir) {
 
     Serial.printf("[TAR] Abriendo %s (%d bytes)\n", tarPath, tarFile.size());
 
-    // Leer header (512 bytes)
     uint8_t header[512];
     int fileCount = 0;
 
     while (tarFile.read(header, 512) == 512) {
-        // Verificar si el header está vacío (fin del archivo)
         if (header[0] == 0) {
             Serial.println("[TAR] Fin del archivo (header vacío)");
             break;
@@ -464,55 +462,65 @@ void extractTar(const char* tarPath, const char* destDir) {
         // Extraer nombre (bytes 0-99)
         char name[101];
         memcpy(name, header, 100);
-        name[100] = 0;
-        
-        // Limpiar prefijo "./" que agrega tar
-        char* cleanName = name;
-        if (strncmp(cleanName, "./", 2) == 0) {
-            cleanName += 2;
+        name[100] = '\0';
+
+        // Limpiar "./" al inicio si existe
+        if (name[0] == '.' && name[1] == '/') {
+            memmove(name, name + 2, strlen(name + 2) + 1);
         }
-        
-        // Extraer tamaño (bytes 124-135, octal)
-        char sizeStr[13];
-        memcpy(sizeStr, header + 124, 12);
-        sizeStr[12] = 0;
-        size_t fileSize = strtoul(sizeStr, NULL, 8);
 
-        // Tipo (byte 156)
+        // Si después de limpiar queda vacío, es el directorio raíz "./", lo saltamos
+        if (strlen(name) == 0) {
+            size_t fileSize = 0;
+            for (int i = 0; i < 12; i++) {
+                if (header[124 + i] >= '0' && header[124 + i] <= '7')
+                    fileSize = fileSize * 8 + (header[124 + i] - '0');
+            }
+            size_t blocks = (fileSize + 511) / 512;
+            size_t pos = tarFile.position();
+            size_t aligned = ((pos + 511) / 512) * 512;
+            if (aligned != pos) tarFile.seek(aligned);
+            continue;
+        }
+
+        // Tamaño
+        size_t fileSize = 0;
+        for (int i = 0; i < 11; i++) {
+            if (header[124 + i] >= '0' && header[124 + i] <= '7')
+                fileSize = fileSize * 8 + (header[124 + i] - '0');
+        }
+
         char typeflag = header[156];
+        String fullPath = String(destDir) + name;
 
-        String filename = String(destDir) + String(cleanName);
-
-        if (typeflag == '5') {
-            Serial.printf("[TAR] Directorio: %s\n", filename.c_str());
-            if (!SD_MMC.exists(filename)) {
-                SD_MMC.mkdir(filename);
+        if (typeflag == '5' || (fileSize == 0 && fullPath.endsWith("/"))) {
+            Serial.printf("[TAR] Directorio: %s\n", fullPath.c_str());
+            if (!SD_MMC.exists(fullPath)) {
+                SD_MMC.mkdir(fullPath);
             }
         } else if (fileSize > 0) {
             fileCount++;
-            Serial.printf("[TAR] Extrayendo: %s (%d bytes)\n", filename.c_str(), fileSize);
+            Serial.printf("[TAR] Extrayendo: %s (%d bytes)\n", fullPath.c_str(), fileSize);
 
-            if (SD_MMC.exists(filename)) {
-                SD_MMC.remove(filename);
+            if (SD_MMC.exists(fullPath)) {
+                SD_MMC.remove(fullPath);
             }
 
-            File outFile = SD_MMC.open(filename, "w");
+            File outFile = SD_MMC.open(fullPath, "w");
             if (outFile) {
                 uint8_t buf[256];
                 size_t remaining = fileSize;
-
                 while (remaining > 0) {
                     size_t toRead = min((size_t)256, remaining);
-                    size_t read = tarFile.read(buf, toRead);
-                    if (read == 0) break;
-                    outFile.write(buf, read);
-                    remaining -= read;
+                    size_t r = tarFile.read(buf, toRead);
+                    if (r == 0) break;
+                    outFile.write(buf, r);
+                    remaining -= r;
                 }
                 outFile.close();
                 Serial.printf("[TAR]   -> OK\n");
             } else {
                 Serial.printf("[TAR]   -> ERROR al crear archivo\n");
-                // Saltar datos
                 tarFile.seek(tarFile.position() + fileSize);
             }
         }
@@ -521,9 +529,7 @@ void extractTar(const char* tarPath, const char* destDir) {
         size_t blocks = (fileSize + 511) / 512;
         size_t pos = tarFile.position();
         size_t aligned = ((pos + 511) / 512) * 512;
-        if (aligned != pos) {
-            tarFile.seek(aligned);
-        }
+        if (aligned != pos) tarFile.seek(aligned);
     }
 
     tarFile.close();
@@ -567,26 +573,25 @@ bool needMandatoryUpdate() {
 }
 
 // --------------- Pantalla de progreso genérica ---------------
-void drawProgressScreen(String title, int progress, int total) {
-    gfx->fillScreen(MAT_BG);
-    gfx->setTextColor(BGR_WHITE);
-    gfx->setTextSize(1);
-    imprimirCentrado(title, 80, 1);
+void drawProgressScreen(const String& title, int progress, int total, bool redrawAll = false) {
+    static String lastTitle = "";
+    if (redrawAll || lastTitle != title) {
+        gfx->fillScreen(MAT_BG);
+        gfx->setTextColor(BGR_WHITE);
+        gfx->setTextSize(1);
+        imprimirCentrado(title, 80, 1);
+        lastTitle = title;
+    }
+
+    int barWidth = 132, barHeight = 20, barX = 20, barY = 120;
     
-    // Barra de progreso
-    int barWidth = 132;
-    int barHeight = 20;
-    int barX = 20;
-    int barY = 120;
-    
+    // Redibujar el contorno solo la primera vez (cuando redrawAll true), pero es más fácil dibujarlo siempre
     gfx->drawRect(barX, barY, barWidth, barHeight, BGR_WHITE);
     
-    if (total > 0) {
-        int filled = (barWidth - 4) * progress / total;
-        gfx->fillRect(barX + 2, barY + 2, filled, barHeight - 4, MAT_CONNECT);
-    }
-    
-    // Porcentaje
+    int filled = (total > 0) ? ((barWidth - 4) * progress / total) : 0;
+    gfx->fillRect(barX + 2, barY + 2, filled, barHeight - 4, MAT_CONNECT);
+    gfx->fillRect(barX + 2 + filled, barY + 2, (barWidth - 4) - filled, barHeight - 4, MAT_BG);
+
     gfx->setCursor(70, 150);
     gfx->setTextColor(BGR_WHITE);
     if (total > 0) {
@@ -624,7 +629,7 @@ void performFullUpdate() {
     }
     
     // ===== PASO 1: Descargar y actualizar SD =====
-    drawProgressScreen("Descargando SD...", 0, 1);
+    drawProgressScreen("Descargando SD...", 0, 1, true);
     
     String sdUrl = getAssetUrl("sd_files.tar");
     if (sdUrl != "") {
@@ -661,7 +666,7 @@ void performFullUpdate() {
                 http.end();
                 
                 // Extraer TAR
-                drawProgressScreen("Actualizando SD...", 0, 1);
+                drawProgressScreen("Actualizando SD...", 0, 1, true);
                 extractTar("/update.tar", "/");
                 SD_MMC.remove("/update.tar");
             } else {
@@ -676,7 +681,7 @@ void performFullUpdate() {
     updateVersionFile();
     
     // ===== PASO 3: Descargar y aplicar OTA =====
-    drawProgressScreen("Descargando firmware...", 0, 1);
+    drawProgressScreen("Descargando firmware...", 0, 1, true);
     
     String fwUrl = getAssetUrl("firmware.bin");
     if (fwUrl != "") {
@@ -710,7 +715,7 @@ void performFullUpdate() {
                 http.end();
                 
                 if (Update.end()) {
-                    drawProgressScreen("Actualizado! Reiniciando...", 1, 1);
+                    drawProgressScreen("Actualizado! Reiniciando...", 1, 1, true);
                     delay(2000);
                     ESP.restart();
                 }

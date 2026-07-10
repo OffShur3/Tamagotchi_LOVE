@@ -1,3 +1,7 @@
+// Librerías
+#include <SD_MMC.h>
+
+// Archivos
 #include "NetworkManager.h"
 #include "colors.h"
 
@@ -55,8 +59,6 @@ void inicializarRed() {
 }
 
 bool pantallaOpcionRed() {
-    gfx->fillScreen(MAT_BG);
-    
     bool resultado = mostrarPopup(
         "Sin Conexion",
         "No se pudo conectar\na ninguna red WiFi.",
@@ -65,14 +67,13 @@ bool pantallaOpcionRed() {
         accionConectarRed,
         accionOffline
     );
-    
-    // resultado es true si presionó "Conectar", false si presionó "Offline"
-    gfx->fillScreen(MAT_BG);
+    // No se limpia la pantalla: el juego seguirá debajo y se redibujará al salir
     return resultado;
 }
 
 // Acción para "Conectar" - abre el portal cautivo
 void accionConectarRed() {
+    Serial.println("[RED] Iniciando portal cautivo...");
     iniciarPortalCautivo();
 }
 
@@ -82,6 +83,8 @@ void accionOffline() {
 }
 
 bool iniciarPortalCautivo() {
+    Serial.println("[PORTAL] Iniciando portal cautivo...");
+
     WiFi.mode(WIFI_AP);
     WiFi.softAP("TamaConfig", "iluvUiluvU<3");
     delay(100); 
@@ -99,13 +102,37 @@ bool iniciarPortalCautivo() {
 
     server.begin();
 
+    // Limpia la pantalla con el color de fondo antes de dibujar el QR
     gfx->fillScreen(MAT_BG);
     
-    pngOffsetX = 36; pngOffsetY = 25;
-    int rc = png.open("/QR Network.png", pngOpen, pngClose, pngRead, pngSeek, pngDraw);
-    if (rc == PNG_SUCCESS) { png.decode(NULL, 0); png.close(); }
-    pngOffsetX = 0; pngOffsetY = 0;
+    // *** NUEVO: Verificar si el archivo QR existe ***
+    if (!SD_MMC.exists("/QR Network.png")) {
+        Serial.println("[PORTAL] ERROR: /QR Network.png no encontrado en la SD");
+        gfx->setTextColor(BGR_RED);
+        imprimirCentrado("QR no encontrado", 140, 1);
+        imprimirCentrado("Revisa la SD", 160, 1);
+        delay(3000);
+        // Aún así continuamos con los textos y el portal (sin QR)
+    } else {
+        // Resetear flags antes de dibujar el QR
+        isSpriteSheet = false; 
+        // Dibujar el código QR desde la SD
+        pngOffsetX = 36; pngOffsetY = 25;
+        int rc = png.open("/QR Network.png", pngOpen, pngClose, pngRead, pngSeek, pngDraw);
+        Serial.printf("[PORTAL] png.open retorno: %d\n", rc);
+        if (rc == PNG_SUCCESS) {
+            png.decode(NULL, 0);
+            png.close();
+            Serial.println("[PORTAL] QR dibujado correctamente");
+        } else {
+            Serial.println("[PORTAL] Fallo al decodificar el PNG del QR");
+            gfx->setTextColor(BGR_RED);
+            imprimirCentrado("Error al cargar QR", 140, 1);
+        }
+        pngOffsetX = 0; pngOffsetY = 0;
+    }
 
+    // Textos informativos (se dibujan tanto si hay QR como si no)
     gfx->setTextColor(BGR_YELLOW);
     imprimirCentrado("Conecta tu celular a:", 135, 1);
     
@@ -122,8 +149,8 @@ bool iniciarPortalCautivo() {
     
     imprimirCentrado("<3", 270, 2);
 
-    // Bucle de monitoreo para gestos de navegación
-    uint16_t startX = 0, startY = 0;
+    // Bucle de monitoreo para gestos de navegación (swipe para salir)
+    uint16_t startX = 0;
     bool gestando = false;
     uint16_t lastX = 0;
 
@@ -142,6 +169,7 @@ bool iniciarPortalCautivo() {
         } else if (gestando) {
             gestando = false;
             if ((lastX - startX) > 50) {
+                Serial.println("[PORTAL] Swipe detectado, saliendo del portal...");
                 server.stop();
                 dnsServer.stop();
                 WiFi.mode(WIFI_STA);

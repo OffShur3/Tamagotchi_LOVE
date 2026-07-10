@@ -28,6 +28,7 @@ extern int pngOffsetX;
 extern int pngOffsetY;
 extern bool redConfigurada;
 extern bool leerTouch(uint16_t &x, uint16_t &y); 
+extern bool isSpriteSheet;
 
 void inicializarRed();
 bool pantallaOpcionRed();

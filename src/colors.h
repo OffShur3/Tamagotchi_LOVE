@@ -7,19 +7,19 @@
 // que tu pantalla BGR entiende correctamente.
 // Para pantalla en modo BGR: bits 15-11 = azul, 10-5 = verde, 4-0 = rojo.
 static inline uint16_t colorBGR(uint8_t r, uint8_t g, uint8_t b) {
-    return ((uint16_t)(b & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (r >> 3);
+    return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (b >> 3);
 }
 
-// ---- Colores básicos (usa colorBGR para garantizar tonos correctos) ----
-#define COLOR_RED    colorBGR(255, 0, 0)    // Rojo real
-#define COLOR_GREEN  colorBGR(0, 255, 0)    // Verde real
-#define COLOR_BLUE   colorBGR(0, 0, 255)    // Azul real
+// Redefinir colores básicos para que sean más vivos
+#define COLOR_RED    colorBGR(255, 136, 0)
+#define COLOR_GREEN  colorBGR(0, 255, 0)
+#define COLOR_BLUE   colorBGR(255, 0, 0)
 #define COLOR_WHITE  colorBGR(255, 255, 255)
 #define COLOR_BLACK  colorBGR(0, 0, 0)
-#define COLOR_YELLOW colorBGR(255, 255, 0)   // Amarillo real
+#define COLOR_YELLOW colorBGR(0, 255, 255)
 
 // ---- Paleta Material Design ----
-#define MAT_BG       colorBGR(18, 18, 18)    // Fondo oscuro
+#define MAT_BG       colorBGR(16, 8, 16) // Gris muy oscuro pero no negro total
 #define MAT_OFFLINE  colorBGR(66, 66, 66)    // Botón secundario
 #define MAT_CONNECT  colorBGR(67, 160, 71)   // Botón de confirmación
 

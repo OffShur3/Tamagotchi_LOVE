@@ -37,6 +37,8 @@ Game* game = nullptr;
 #define SD_CMD 15
 #define SD_D0  17
 
+volatile bool peticionDormir = false; // "volatile" es vital para interrupciones
+
 Arduino_DataBus *bus = new Arduino_ESP32SPI(45, 21, 38, 39);
 Arduino_GFX *gfx = new Arduino_ST7789(
     bus, 40, 0, false,
@@ -72,37 +74,51 @@ int32_t pngSeek(PNGFILE *handle, int32_t position) {
 }
 
 int pngDraw(PNGDRAW *pDraw) {
-    int y = pDraw->y + pngOffsetY;
-    if (y >= gfx->height()) return 0;
+    // Definimos un color que actuará como transparente (ej. un fucsia o un negro puro 0x0000)
+    // Usaremos 0x0000 y configuraremos getLineAsRGB565 para que lo use en zonas transparentes.
+    uint16_t transparentKey = 0x0000; 
 
-    png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0xffffffff);
+    // 1. Obtener la línea. El último parámetro es el color que se usará para los píxeles transparentes.
+    png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0ULL); 
+    // Nota: El valor 0ULL aquí le dice a la librería que si hay transparencia, rellene con 0 (negro).
 
     if (isSpriteSheet) {
-        // --- ESCALADO x2 Y RECORTE ---
-        int sourceX = currentFrame * spriteWidth;
-        
-        // 1. Escalar horizontalmente al buffer auxiliar
-        for (int i = 0; i < spriteWidth; i++) {
-            uint16_t pixel = globalLineBuffer[sourceX + i];
-            scaledLineBuffer[i * 2] = pixel;
-            scaledLineBuffer[i * 2 + 1] = pixel;
-        }
+        // --- MODO BICHO (Escalado x2 + Crop + Transparencia por Chroma Key) ---
+        int sourceXStart = currentFrame * spriteWidth;
+        int screenY = pngOffsetY + (pDraw->y * 2);
 
-        // 2. Dibujar la línea actual
-        gfx->draw16bitRGBBitmap(pngOffsetX, y, scaledLineBuffer, spriteWidth * 2, 1);
-        
-        // 3. Duplicar la línea verticalmente si hay espacio
-        if (y + 1 < gfx->height()) {
-            gfx->draw16bitRGBBitmap(pngOffsetX, y + 1, scaledLineBuffer, spriteWidth * 2, 1);
-        }
-        
-        // Ajustamos el offset interno para la siguiente línea de PNGdec
-        // Esto compensa que estamos dibujando de a 2 pixeles de alto
-        pngOffsetY++; 
+        if (screenY >= gfx->height()) return 0;
 
+        for (int x = 0; x < spriteWidth; x++) {
+            uint16_t pixel = globalLineBuffer[sourceXStart + x];
+            
+            // En lugar de usar pAlpha, comparamos contra nuestra clave de transparencia
+            // Si el PNG tiene canal alfa, getLineAsRGB565 lo procesará y pondrá 0 donde sea transparente
+            if (pixel != transparentKey) {
+                gfx->writePixel(pngOffsetX + (x * 2),     screenY,     pixel);
+                gfx->writePixel(pngOffsetX + (x * 2) + 1, screenY,     pixel);
+                gfx->writePixel(pngOffsetX + (x * 2),     screenY + 1, pixel);
+                gfx->writePixel(pngOffsetX + (x * 2) + 1, screenY + 1, pixel);
+            }
+        }
     } else {
-        // --- DIBUJO NORMAL (Fondo e Iconos) ---
-        gfx->draw16bitRGBBitmap(pngOffsetX, y, globalLineBuffer, pDraw->iWidth, 1);
+        // --- MODO NORMAL (Fondo, UI, QR) ---
+        int screenY = pngOffsetY + pDraw->y;
+        if (screenY >= gfx->height()) return 0;
+
+        // Si es el fondo (isSpriteSheet suele ser false), dibujamos todo
+        // Si son iconos con transparencia, usamos el filtro de pixel
+        if (pDraw->iHasAlpha) { // Usamos iHasAlpha que el compilador sugirió
+            for (int x = 0; x < pDraw->iWidth; x++) {
+                uint16_t pixel = globalLineBuffer[x];
+                if (pixel != transparentKey) {
+                    gfx->drawPixel(pngOffsetX + x, screenY, pixel);
+                }
+            }
+        } else {
+            // Imagen opaca (Fondo)
+            gfx->draw16bitRGBBitmap(pngOffsetX, screenY, globalLineBuffer, pDraw->iWidth, 1);
+        }
     }
     return 1;
 }
@@ -127,6 +143,17 @@ bool leerTouch(uint16_t &x, uint16_t &y) {
     }
   }
   return false;
+}
+
+// Función que se ejecuta en el instante exacto que presionas el botón
+void IRAM_ATTR isrBotonBoot() {
+    static unsigned long ultimaInterrupcion = 0;
+    unsigned long tiempoAhora = millis();
+    // Debounce simple: evitar rebotes mecánicos del botón
+    if (tiempoAhora - ultimaInterrupcion > 200) { 
+        peticionDormir = true;
+    }
+    ultimaInterrupcion = tiempoAhora;
 }
 
 // Función para verificar la SD en un bucle
@@ -175,6 +202,8 @@ void setup() {
   // Inicialización de hardware base
   pinMode(TFT_BL, OUTPUT);
   pinMode(BOOT_PIN, INPUT_PULLUP); // Pin de botón del Deep Sleep
+  // Adjuntar la interrupción al pin 0 (FALLING = cuando se presiona)
+  attachInterrupt(digitalPinToInterrupt(BOOT_PIN), isrBotonBoot, FALLING);
   digitalWrite(TFT_BL, HIGH);
   gfx->begin();
   bus->beginWrite();
@@ -200,13 +229,10 @@ void setup() {
 }
 
 void loop() {
-  // 1. Verificar Botón BOOT para dormir
-  if (digitalRead(BOOT_PIN) == LOW) {
-      unsigned long pressTime = millis();
-      while(digitalRead(BOOT_PIN) == LOW) { delay(10); } // Debounce
-      if (millis() - pressTime > 100) { // Si fue un click real
-          irADormir();
-      }
+  // 1. Revisar el flag de la interrupción al inicio del loop
+  if (peticionDormir) {
+      peticionDormir = false; // Resetear flag
+      irADormir();
   }
 
   // Leer touch al inicio (necesario para badge y juego)
@@ -219,6 +245,18 @@ void loop() {
   if (!redConfigurada && millis() - lastWiFiAttempt > 10000) { // cada 10 segundos
     lastWiFiAttempt = millis();
     inicializarRed();
+  }
+
+  static bool networkPopupShown = false;
+  if (!redConfigurada && !networkPopupShown && !updateInProgress && !mandatoryUpdate) {
+      // Evitar que se muestre justo al arrancar (dar tiempo a iniciar)
+      static unsigned long bootTime = millis();
+      if (millis() - bootTime > 10000) { // Esperar 3 segundos tras el boot
+          bool conecto = pantallaOpcionRed();
+          networkPopupShown = true;
+          // Forzar redibujado del juego al volver del popup/portal
+          if (game) game->redraw();
+      }
   }
 
   // Actualización obligatoria al inicio (solo una vez)

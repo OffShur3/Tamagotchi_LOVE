@@ -596,8 +596,11 @@ void performFullUpdate() {
         }
         http.end();
     }
+    
+    // Pequeña pausa para estabilizar la conexión SSL
+    delay(1000);
 
-    // ===== PASO 1: Descargar sd_files.tar =====
+    // ===== PASO 1: Descargar sd_files.tar (con reintentos) =====
     drawProgressScreen("Descargando SD...", 0, 1, true);
     String sdUrl = getAssetUrl("sd_files.tar");
     if (sdUrl == "") {
@@ -607,47 +610,77 @@ void performFullUpdate() {
         return;
     }
 
-    HTTPClient http;
-    http.setTimeout(30000);
-    http.begin(sdUrl);
-    http.addHeader("User-Agent", "Tamagotchi-ESP32");
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    int code = http.GET();
-    if (code != 200) {
+    bool sdDownloaded = false;
+    for (int intento = 0; intento < 3 && !sdDownloaded; intento++) {
+        if (intento > 0) {
+            Serial.printf("[SD] Reintentando descarga (%d/3)...\n", intento + 1);
+            drawProgressScreen("Reintentando SD...", intento, 3);
+            delay(2000); // Esperar 2 segundos antes de reintentar
+        }
+
+        HTTPClient http;
+        http.setTimeout(30000);
+        http.begin(sdUrl);
+        http.addHeader("User-Agent", "Tamagotchi-ESP32");
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        
+        int sdCode = http.GET();
+        if (sdCode != 200) {
+            Serial.printf("[SD] Error HTTP %d en intento %d\n", sdCode, intento + 1);
+            http.end();
+            continue;
+        }
+
+        int sdContentLength = http.getSize();
+        WiFiClient *sdStream = http.getStreamPtr();
+        File tarFile = SD_MMC.open("/update.tar", "w");
+        
+        if (!tarFile) {
+            http.end();
+            Serial.println("[SD] ERROR: No se pudo crear /update.tar");
+            continue;
+        }
+
+        uint8_t buffer[256];
+        int downloaded = 0;
+        bool downloadError = false;
+        
+        while (http.connected() && downloaded < sdContentLength && !downloadError) {
+            size_t available = sdStream->available();
+            if (available) {
+                int bytesRead = sdStream->readBytes(buffer, min((size_t)256, available));
+                if (bytesRead <= 0) {
+                    downloadError = true;
+                    break;
+                }
+                tarFile.write(buffer, bytesRead);
+                downloaded += bytesRead;
+                
+                if (sdContentLength > 0) {
+                    drawProgressScreen("Descargando SD...", downloaded, sdContentLength);
+                }
+            }
+            yield();
+        }
+        
+        tarFile.close();
         http.end();
+        
+        if (!downloadError && downloaded == sdContentLength) {
+            sdDownloaded = true;
+            Serial.printf("[SD] Descarga exitosa (%d bytes)\n", downloaded);
+        } else {
+            Serial.printf("[SD] Error en descarga: %d/%d bytes\n", downloaded, sdContentLength);
+            SD_MMC.remove("/update.tar");
+        }
+    }
+
+    if (!sdDownloaded) {
         drawProgressScreen("Error al descargar SD", 0, 1, true);
         delay(3000);
         updateInProgress = false;
         return;
     }
-
-    int contentLength = http.getSize();
-    WiFiClient *stream = http.getStreamPtr();
-    File tarFile = SD_MMC.open("/update.tar", "w");
-    if (!tarFile) {
-        http.end();
-        drawProgressScreen("Error al crear /update.tar", 0, 1, true);
-        delay(3000);
-        updateInProgress = false;
-        return;
-    }
-
-    uint8_t buffer[256];
-    int downloaded = 0;
-    while (http.connected() && downloaded < contentLength) {
-        size_t available = stream->available();
-        if (available) {
-            int bytesRead = stream->readBytes(buffer, min((size_t)256, available));
-            tarFile.write(buffer, bytesRead);
-            downloaded += bytesRead;
-            if (contentLength > 0) {
-                drawProgressScreen("Descargando SD...", downloaded, contentLength);
-            }
-        }
-        yield();
-    }
-    tarFile.close();
-    http.end();
 
     // Extraer TAR
     drawProgressScreen("Actualizando SD...", 0, 1, true);
@@ -671,8 +704,8 @@ void performFullUpdate() {
     httpFw.begin(fwUrl);
     httpFw.addHeader("User-Agent", "Tamagotchi-ESP32");
     httpFw.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-    code = httpFw.GET();
-    if (code != 200) {
+    int fwCode = httpFw.GET();
+    if (fwCode != 200) {
         httpFw.end();
         drawProgressScreen("Error al descargar firmware", 0, 1, true);
         delay(3000);
@@ -680,8 +713,8 @@ void performFullUpdate() {
         return;
     }
 
-    contentLength = httpFw.getSize();
-    if (!Update.begin(contentLength)) {
+    int fwContentLength = httpFw.getSize();
+    if (!Update.begin(fwContentLength)) {
         httpFw.end();
         drawProgressScreen("Error OTA begin", 0, 1, true);
         delay(3000);
@@ -689,17 +722,17 @@ void performFullUpdate() {
         return;
     }
 
-    stream = httpFw.getStreamPtr();
+    WiFiClient *fwStream = httpFw.getStreamPtr();
     int bytesWritten = 0;
     uint8_t otaBuffer[512];
-    while (httpFw.connected() && bytesWritten < contentLength) {
-        size_t available = stream->available();
+    while (httpFw.connected() && bytesWritten < fwContentLength) {
+        size_t available = fwStream->available();
         if (available) {
-            int bytesRead = stream->readBytes(otaBuffer, min((size_t)512, available));
+            int bytesRead = fwStream->readBytes(otaBuffer, min((size_t)512, available));
             Update.write(otaBuffer, bytesRead);
             bytesWritten += bytesRead;
-            if (contentLength > 0) {
-                drawProgressScreen("Descargando firmware...", bytesWritten, contentLength);
+            if (fwContentLength > 0) {
+                drawProgressScreen("Descargando firmware...", bytesWritten, fwContentLength);
             }
         }
         yield();

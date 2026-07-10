@@ -32,4 +32,8 @@ static inline uint16_t colorBGR(uint8_t r, uint8_t g, uint8_t b) {
 #define BGR_BLACK  COLOR_BLACK
 #define BGR_YELLOW COLOR_YELLOW
 
+// ---- Colores para el juego Tamagotchi ----
+#define TAMA_BROWN colorBGR(76, 40, 24) // #4C2818
+#define TAMA_UI_BG colorBGR(245, 223, 191) // Un crema tipo Stardew
+
 #endif

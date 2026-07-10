@@ -14,5 +14,10 @@ void imprimirCentrado(String texto, int y, int size);
 void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String texto, int textSize, uint16_t colorTexto);
 void esperarSoltar();
 
+// Popup genérico con dos botones (uno arriba del otro)
+// Retorna true si presionó el botón superior, false si presionó el inferior
+bool mostrarPopup(String header, String body, String btnSi, String btnNo,
+                  void (*accionSi)(), void (*accionNo)());
+
 
 #endif

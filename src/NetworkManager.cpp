@@ -56,37 +56,29 @@ void inicializarRed() {
 
 bool pantallaOpcionRed() {
     gfx->fillScreen(MAT_BG);
+    
+    bool resultado = mostrarPopup(
+        "Sin Conexion",
+        "No se pudo conectar\na ninguna red WiFi.",
+        "Conectar",
+        "Offline",
+        accionConectarRed,
+        accionOffline
+    );
+    
+    // resultado es true si presionó "Conectar", false si presionó "Offline"
+    gfx->fillScreen(MAT_BG);
+    return resultado;
+}
 
-    gfx->setTextColor(BGR_WHITE);
-    imprimirCentrado("Sin Conexion", 30, 2);
+// Acción para "Conectar" - abre el portal cautivo
+void accionConectarRed() {
+    iniciarPortalCautivo();
+}
 
-    dibujarBoton(10, 80, 152, 60, 12, MAT_OFFLINE, "Offline", 2, BGR_WHITE);
-    dibujarBoton(10, 180, 152, 60, 12, MAT_CONNECT, "Conectar", 2, BGR_WHITE);
-
-    // Esperar a que suelte antes de detectar
-    uint16_t tx, ty;
-    while (leerTouch(tx, ty)) { delay(10); }
-    delay(100);
-
-    uint16_t x, y;
-    while (true) {
-        if (leerTouch(x, y)) {
-            if (y > 80 && y < 140) {
-                // Esperar a que suelte
-                while (leerTouch(tx, ty)) { delay(10); }
-                delay(100);
-                gfx->fillScreen(MAT_BG);
-                return false; 
-            }
-            if (y > 180 && y < 240) {
-                while (leerTouch(tx, ty)) { delay(10); }
-                delay(100);
-                gfx->fillScreen(MAT_BG);
-                return true; 
-            }
-        }
-        delay(50);
-    }
+// Acción para "Offline" - simplemente sale
+void accionOffline() {
+    // No hace nada, solo cierra el popup
 }
 
 bool iniciarPortalCautivo() {

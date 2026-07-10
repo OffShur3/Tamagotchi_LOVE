@@ -36,5 +36,7 @@ void procesarPortal();
 void cargarPaginaConfig();
 void guardarCredenciales();
 void borrarRedes();
+void accionConectarRed();
+void accionOffline();
 
 #endif

@@ -107,99 +107,41 @@ bool isTouchingBadge(uint16_t x, uint16_t y) {
     }
     return tocando;
 }
-// --------------- Popup de actualización ---------------
-void showUpdatePopup() {
-    Serial.println("[UPDATE] Mostrando popup de nueva versión");
 
-    gfx->fillRoundRect(10, 80, 152, 160, 12, MAT_BG);
-    gfx->drawRoundRect(10, 80, 152, 160, 12, BGR_WHITE);
-
-    gfx->setTextColor(BGR_WHITE);
-    gfx->setTextSize(1);
-    imprimirCentrado("Nueva version!", 95, 1);
-
-    gfx->setTextColor(BGR_GREEN);
-    gfx->setTextSize(2);
-    String versionText = latestVersion;
-    int xPos = 86 - (versionText.length() * 12) / 2;
-    gfx->setCursor(xPos, 115);
-    gfx->print(versionText);
-
-    dibujarBoton(20, 155, 132, 35, 8, MAT_CONNECT, "Actualizar", 1, BGR_WHITE);
-    dibujarBoton(20, 200, 132, 35, 8, MAT_OFFLINE, "Mas tarde", 1, BGR_WHITE);
-
-    // Esperar a que suelte antes de empezar a detectar
-    esperarSoltar();
-
-    uint16_t tx, ty;
-    while (true) {
-        if (leerTouch(tx, ty)) {
-            Serial.printf("[UPDATE] Popup - Touch en x=%d, y=%d\n", tx, ty);
-
-            if (tx >= 20 && tx <= 152 && ty >= 155 && ty <= 190) {
-                Serial.println("[UPDATE] Botón 'Actualizar' presionado");
-                esperarSoltar();
-                showConfirmPopup();
-                return;
-            }
-            if (tx >= 20 && tx <= 152 && ty >= 200 && ty <= 235) {
-                Serial.println("[UPDATE] Botón 'Más tarde' presionado");
-                esperarSoltar();
-
-                // Restaurar la pantalla
-                gfx->fillScreen(MAT_BG);
-                if (game) game->redraw();
-                
-                return;  // badge seguirá visible porque updateAvailable sigue true
-            }
-        }
-        delay(50);
+// Acción para "Sí" en popup de actualización
+void accionActualizarSi() {
+    if (mandatoryUpdate) {
+        performFullUpdate();
+    } else {
+        performFirmwareUpdate();
     }
 }
 
-// --------------- Popup de confirmación ---------------
-void showConfirmPopup() {
-    Serial.println("[UPDATE] Mostrando popup de confirmación");
+// Acción para "No" / "Más tarde" en popup de actualización
+void accionActualizarNo() {
+    updateAvailable = false;  // Solo para actualizaciones periódicas
+    mandatoryUpdate = false;
+    gfx->fillScreen(MAT_BG);
+    if (game) game->redraw();
+}
 
-    gfx->fillRoundRect(10, 100, 152, 120, 12, MAT_BG);
-    gfx->drawRoundRect(10, 100, 152, 120, 12, BGR_WHITE);
-
-    gfx->setTextColor(BGR_YELLOW);
-    gfx->setTextSize(1);
-    imprimirCentrado("Se reiniciara", 115, 1);
-    imprimirCentrado("el dispositivo", 130, 1);
-    imprimirCentrado("Continuar?", 145, 1);
-
-    dibujarBoton(20, 170, 55, 35, 8, MAT_CONNECT, "Si", 1, BGR_WHITE);
-    dibujarBoton(97, 170, 55, 35, 8, MAT_OFFLINE, "No", 1, BGR_WHITE);
-
-    // Esperar a que suelte antes de empezar a detectar
-    esperarSoltar();
-
-    uint16_t tx, ty;
-    while (true) {
-        if (leerTouch(tx, ty)) {
-            Serial.printf("[UPDATE] Confirm - Touch en x=%d, y=%d\n", tx, ty);
-
-            if (tx >= 20 && tx <= 75 && ty >= 170 && ty <= 205) {
-                Serial.println("[UPDATE] Botón 'Sí' presionado");
-                esperarSoltar();
-                if (mandatoryUpdate) {
-                    performFullUpdate();
-                } else {
-                    performFirmwareUpdate();
-                }
-                return;
-            }
-            if (tx >= 97 && tx <= 152 && ty >= 170 && ty <= 205) {
-                Serial.println("[UPDATE] Botón 'No' presionado");
-                esperarSoltar();
-                updateAvailable = false;
-                return;
-            }
-        }
-        delay(50);
+// --------------- Popup de actualización ---------------
+void showUpdatePopup() {
+    String header, body, btnSi, btnNo;
+    
+    if (mandatoryUpdate) {
+        header = "Actualizacion requerida";
+        body = "Version " + latestVersion + "\ndisponible.";
+        btnSi = "Actualizar ahora";
+        btnNo = "Mas tarde";
+    } else {
+        header = "Nueva version!";
+        body = "Version " + latestVersion + "\ndisponible.";
+        btnSi = "Actualizar";
+        btnNo = "Mas tarde";
     }
+    
+    mostrarPopup(header, body, btnSi, btnNo, accionActualizarSi, accionActualizarNo);
 }
 
 // --------------- Obtener URL de asset desde GitHub API ---------------

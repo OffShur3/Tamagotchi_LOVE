@@ -40,3 +40,55 @@ void dibujarBoton(int x, int y, int w, int h, int r, uint16_t colorFondo, String
     gfx->setCursor(textX, textY);
     gfx->print(texto);
 }
+
+bool mostrarPopup(String header, String body, String btnSi, String btnNo,
+                  void (*accionSi)(), void (*accionNo)()) {
+    // Dibujar fondo del popup
+    gfx->fillRoundRect(10, 70, 152, 190, 12, MAT_BG);
+    gfx->drawRoundRect(10, 70, 152, 190, 12, BGR_WHITE);
+
+    // Header (título)
+    gfx->setTextColor(BGR_WHITE);
+    gfx->setTextSize(1);
+    imprimirCentrado(header, 85, 1);
+
+    // Body (puede ser multilínea simple con \n)
+    gfx->setTextColor(BGR_YELLOW);
+    gfx->setTextSize(1);
+    int yPos = 110;
+    String linea = "";
+    for (int i = 0; i <= body.length(); i++) {
+        if (body[i] == '\n' || body[i] == '\0') {
+            imprimirCentrado(linea, yPos, 1);
+            yPos += 15;
+            linea = "";
+        } else {
+            linea += body[i];
+        }
+    }
+
+    // Botones (uno arriba del otro)
+    dibujarBoton(20, 165, 132, 35, 8, MAT_CONNECT, btnSi, 1, BGR_WHITE);
+    dibujarBoton(20, 210, 132, 35, 8, MAT_OFFLINE, btnNo, 1, BGR_WHITE);
+
+    esperarSoltar();
+
+    uint16_t tx, ty;
+    while (true) {
+        if (leerTouch(tx, ty)) {
+            // Botón superior (Si)
+            if (tx >= 20 && tx <= 152 && ty >= 165 && ty <= 200) {
+                esperarSoltar();
+                if (accionSi) accionSi();
+                return true;
+            }
+            // Botón inferior (No)
+            if (tx >= 20 && tx <= 152 && ty >= 210 && ty <= 245) {
+                esperarSoltar();
+                if (accionNo) accionNo();
+                return false;
+            }
+        }
+        delay(50);
+    }
+}

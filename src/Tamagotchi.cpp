@@ -69,12 +69,17 @@ void Tamagotchi::saveGame() {
 }
 
 void Tamagotchi::renderLayer(String path, int x, int y) {
-    if (!SD_MMC.exists(path)) return;
+    if (!SD_MMC.exists(path)) {
+        Serial.printf("[TAMA] Archivo no encontrado: %s\n", path.c_str());
+        return;
+    }
     pngOffsetX = x+2;
     pngOffsetY = y;
     if (png->open(path.c_str(), pngOpen, pngClose, pngRead, pngSeek, pngDraw) == PNG_SUCCESS) {
         png->decode(NULL, 0);
         png->close();
+    } else {
+        Serial.printf("[TAMA] Error al abrir PNG: %s\n", path.c_str());
     }
 }
 
@@ -147,9 +152,10 @@ void Tamagotchi::update(uint16_t x, uint16_t y, bool touched) {
 }
 
 void Tamagotchi::redraw() {
-    drawBackground(); // Capa 0
-    drawPet();        // Capa 1 (Escalada x2)
-    drawUI();         // Capa 2
+    drawBackground(); // isSpriteSheet = false
+    drawPet();        // isSpriteSheet = true
+    isSpriteSheet = false; // Restaurar para otros usos
+    drawUI();         // ya no se dibujará en modo sprite
 }
 
 String Tamagotchi::getStageName(Stage s) {

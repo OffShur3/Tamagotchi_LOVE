@@ -74,16 +74,10 @@ int32_t pngSeek(PNGFILE *handle, int32_t position) {
 }
 
 int pngDraw(PNGDRAW *pDraw) {
-    // Definimos un color que actuará como transparente (ej. un fucsia o un negro puro 0x0000)
-    // Usaremos 0x0000 y configuraremos getLineAsRGB565 para que lo use en zonas transparentes.
-    uint16_t transparentKey = 0x0000; 
-
-    // 1. Obtener la línea. El último parámetro es el color que se usará para los píxeles transparentes.
-    png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0ULL); 
-    // Nota: El valor 0ULL aquí le dice a la librería que si hay transparencia, rellene con 0 (negro).
+    uint16_t transparentKey = 0x0000;
+    png.getLineAsRGB565(pDraw, globalLineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0ULL);
 
     if (isSpriteSheet) {
-        // --- MODO BICHO (Escalado x2 + Crop + Transparencia por Chroma Key) ---
         int sourceXStart = currentFrame * spriteWidth;
         int screenY = pngOffsetY + (pDraw->y * 2);
 
@@ -91,14 +85,12 @@ int pngDraw(PNGDRAW *pDraw) {
 
         for (int x = 0; x < spriteWidth; x++) {
             uint16_t pixel = globalLineBuffer[sourceXStart + x];
-            
-            // En lugar de usar pAlpha, comparamos contra nuestra clave de transparencia
-            // Si el PNG tiene canal alfa, getLineAsRGB565 lo procesará y pondrá 0 donde sea transparente
             if (pixel != transparentKey) {
-                gfx->writePixel(pngOffsetX + (x * 2),     screenY,     pixel);
-                gfx->writePixel(pngOffsetX + (x * 2) + 1, screenY,     pixel);
-                gfx->writePixel(pngOffsetX + (x * 2),     screenY + 1, pixel);
-                gfx->writePixel(pngOffsetX + (x * 2) + 1, screenY + 1, pixel);
+                // CAMBIO: usar drawPixel en lugar de writePixel
+                gfx->drawPixel(pngOffsetX + (x * 2),     screenY,     pixel);
+                gfx->drawPixel(pngOffsetX + (x * 2) + 1, screenY,     pixel);
+                gfx->drawPixel(pngOffsetX + (x * 2),     screenY + 1, pixel);
+                gfx->drawPixel(pngOffsetX + (x * 2) + 1, screenY + 1, pixel);
             }
         }
     } else {

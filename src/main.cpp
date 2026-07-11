@@ -37,14 +37,14 @@ Game* game = nullptr;
 #define SD_CMD 15
 #define SD_D0  17
 
-volatile bool peticionDormir = false; // "volatile" es vital para interrupciones
-
 Arduino_DataBus *bus = new Arduino_ESP32SPI(45, 21, 38, 39);
 Arduino_GFX *gfx = new Arduino_ST7789(
     bus, 40, 0, false,
     172, 320,
     34, 0,
     34, 0);
+
+volatile bool peticionDormir = false; // "volatile" es vital para interrupciones
 
 PNG png;
 uint16_t globalLineBuffer[512];

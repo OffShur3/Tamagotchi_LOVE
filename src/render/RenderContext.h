@@ -2,13 +2,21 @@
 #include <stdint.h>
 
 struct Vector2 {
-    int16_t x = 0;
-    int16_t y = 0;
+    int16_t x;
+    int16_t y;
+
+    // Constructores explícitos para compatibilidad con C++11
+    Vector2() : x(0), y(0) {}
+    Vector2(int16_t _x, int16_t _y) : x(_x), y(_y) {}
 };
 
 struct Size2 {
-    int16_t w = 0;
-    int16_t h = 0;
+    int16_t w;
+    int16_t h;
+
+    // Constructores explícitos para compatibilidad con C++11
+    Size2() : w(0), h(0) {}
+    Size2(int16_t _w, int16_t _h) : w(_w), h(_h) {}
 };
 
 class RenderContext {

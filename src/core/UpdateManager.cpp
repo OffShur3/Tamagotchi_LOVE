@@ -3,7 +3,7 @@
 #include <WiFi.h>
 
 UpdateManager::UpdateManager(const Config& config)
-    : _cfg(config), _latestVersion(""), _updateAvailable(false) {}
+    : _cfg(config), _latestVersion(""), _updateAvailable(false), _lastTitle("") {}
 
 String UpdateManager::getCurrentVersion() {
     if (!SD_MMC.exists(_cfg.currentVersionPath)) {
@@ -27,185 +27,311 @@ bool UpdateManager::needMandatoryUpdate() {
 bool UpdateManager::checkForUpdate() {
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    WiFiClientSecure client;
-    client.setInsecure(); 
-
-    HTTPClient http;
-    http.setTimeout(10000);
-    String url = "https://api.github.com/repos/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/latest";
-
-    http.begin(client, url);
-    http.addHeader("User-Agent", "Tamagotchi-ESP32");
-    int httpCode = http.GET();
-
-    if (httpCode == 200) {
-        String payload = http.getString();
-        
-        int tagPos = payload.indexOf("\"tag_name\":\"");
-        if (tagPos != -1) {
-            tagPos += 12;
-            int tagEnd = payload.indexOf("\"", tagPos);
-            _latestVersion = payload.substring(tagPos, tagEnd);
-            
-            String current = getCurrentVersion();
-            Serial.printf("[OTA] Versión actual: %s | Última en GitHub: %s\n", current.c_str(), _latestVersion.c_str());
-            
-            if (_latestVersion != current && _latestVersion.length() > 0) {
-                _updateAvailable = true;
-                http.end();
-                return true;
-            }
-        }
+    int waitCount = 0;
+    while (WiFi.localIP().toString() == "0.0.0.0" && waitCount < 50) {
+        delay(100);
+        waitCount++;
     }
-    http.end();
+    if (WiFi.localIP().toString() == "0.0.0.0") {
+        Serial.println("[OTA] Error: Falló DHCP (No hay IP).");
+        return false;
+    }
+
+    delay(1000); // Estabilización del DNS del router
+
+    int retries = 3;
+    while (retries > 0) {
+        WiFiClientSecure client;
+        client.setInsecure(); 
+        client.setTimeout(10000); 
+
+        HTTPClient http;
+        http.setTimeout(10000);
+        String url = "https://api.github.com/repos/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/latest";
+
+        if (http.begin(client, url)) {
+            http.addHeader("User-Agent", "Tamagotchi-ESP32");
+            int httpCode = http.GET();
+
+            if (httpCode == 200) {
+                String payload = http.getString();
+                
+                int tagPos = payload.indexOf("\"tag_name\":\"");
+                if (tagPos != -1) {
+                    tagPos += 12;
+                    int tagEnd = payload.indexOf("\"", tagPos);
+                    _latestVersion = payload.substring(tagPos, tagEnd);
+                    
+                    String current = getCurrentVersion();
+                    Serial.printf("[OTA] Versión actual: %s | Última en GitHub: %s\n", current.c_str(), _latestVersion.c_str());
+                    
+                    if (_latestVersion != current && _latestVersion.length() > 0) {
+                        _updateAvailable = true;
+                    }
+                }
+                http.end();
+                client.stop();
+                return _updateAvailable;
+            } else {
+                Serial.printf("[OTA] Error API GitHub: %s (Código: %d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            }
+            http.end();
+        } 
+        client.stop();
+
+        retries--;
+        if (retries > 0) delay(2000);
+    }
     return false;
 }
 
-String UpdateManager::getAssetUrl(const char* assetName) {
-    // OPTIMIZACIÓN GIGANTE: 
-    // Como ya sabemos la versión exacta que necesitamos, predecimos la URL de GitHub.
-    // Esto evita hacer llamadas extra a la API, eliminando la sobrecarga de RAM y el error "Bad file number" de los sockets.
-    return "https://github.com/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/download/" + _latestVersion + "/" + String(assetName);
+void UpdateManager::drawMessage(const String& msg) {
+    _lastTitle = ""; 
+    _cfg.gfx->fillScreen(0x18C3);
+    _cfg.gfx->setTextColor(0xFFFF);
+    _cfg.gfx->setTextSize(1);
+    int textX = (172 - (msg.length() * 6)) / 2;
+    if (textX < 0) textX = 0;
+    _cfg.gfx->setCursor(textX, 150);
+    _cfg.gfx->print(msg);
 }
 
 void UpdateManager::drawProgress(const String& title, int progress, int total) {
-    _cfg.gfx->fillScreen(0x18C3); // Fondo azul rústico
-    _cfg.gfx->setTextColor(0xFFFF);
-    _cfg.gfx->setTextSize(1);
-    
-    int textX = (172 - (title.length() * 6)) / 2;
-    _cfg.gfx->setCursor(textX, 100);
-    _cfg.gfx->print(title);
-    
-    int barW = 132;
-    _cfg.gfx->drawRect(20, 130, barW, 20, 0xFFFF);
+    if (title != _lastTitle) {
+        _cfg.gfx->fillScreen(0x18C3);
+        _cfg.gfx->setTextColor(0xFFFF);
+        _cfg.gfx->setTextSize(1);
+        int textX = (172 - (title.length() * 6)) / 2;
+        if (textX < 0) textX = 0;
+        _cfg.gfx->setCursor(textX, 100);
+        _cfg.gfx->print(title);
+        _cfg.gfx->drawRect(20, 130, 132, 20, 0xFFFF);
+        _lastTitle = title;
+    }
     
     if (total > 0) {
-        int fill = (barW - 4) * progress / total;
-        _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8); // Nuevo verde Stardew
+        int fill = (128 * progress) / total;
+        if (fill > 128) fill = 128;
+        _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8); 
     } else {
-        // Si el servidor (AWS S3) no reporta el tamaño, animamos la barra con el progreso infinito
-        int fill = (progress % 102400) * (barW - 4) / 102400; // Se reinicia cada 100KB
+        int fill = (progress % 102400) * 128 / 102400;
         _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8);
+        _cfg.gfx->fillRect(22 + fill, 132, 128 - fill, 16, 0x18C3);
     }
 }
 
+String UpdateManager::getAssetUrl(const char* assetName) {
+    return "https://github.com/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/download/" + _latestVersion + "/" + String(assetName);
+}
+
 bool UpdateManager::performFullUpdate() {
+    drawMessage("Liberando RAM...");
+    // 1. Ya se borró el juego en main.cpp. Aquí frenamos 1.5s para que LwIP 
+    //    destruya toda la basura de red acumulada y libere los sockets 100%.
+    delay(1500); 
+    Serial.printf("[OTA] RAM Libre antes de iniciar: %u bytes\n", ESP.getFreeHeap());
+
     Serial.println("[OTA] Iniciando actualización de SD...");
-    performSDUpdate(); 
+    if (!performSDUpdate()) {
+        Serial.println("[OTA] Error actualizando la SD.");
+        drawMessage("Fallo al bajar la SD");
+        delay(3000);
+        ESP.restart(); 
+    }
+
+    drawMessage("Preparando firmware...");
+    delay(1000); // Evitar saturación antes de la 2da descarga
 
     Serial.println("[OTA] Iniciando actualización de Firmware...");
     if (performFirmwareUpdate()) {
         writeVersionFile(_latestVersion);
         Serial.println("[OTA] ¡Actualización completada! Reiniciando...");
-        delay(1000);
+        drawMessage("Actualizacion Lista!");
+        delay(2000);
         ESP.restart();
         return true;
     }
     
-    Serial.println("[OTA] Falló la actualización.");
+    Serial.println("[OTA] Falló la actualización del Firmware.");
+    drawMessage("Fallo el Firmware");
+    delay(3000);
+    ESP.restart();
+    return false;
+}
+
+bool UpdateManager::performSDUpdate() {
+    String url = getAssetUrl("sd_files.tar");
+    drawMessage("Buscando SD...");
+    int retries = 0;
+
+    // AHORA EL BUCLE REINTENTA INCLUSO SI SE CORTA EL INTERNET O FALLA EL DNS
+    while (retries < 15) {
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setTimeout(10000);
+        
+        HTTPClient http;
+        const char* headerKeys[] = {"Location"};
+        http.collectHeaders(headerKeys, 1);
+
+        if (!http.begin(client, url)) {
+            client.stop();
+            delay(2000);
+            retries++;
+            continue;
+        }
+
+        int httpCode = http.GET();
+
+        // REDIRECCIÓN LIMPIA Y DESTRUCCIÓN DEL ENLACE VIEJO
+        if (httpCode == 301 || httpCode == 302) {
+            url = http.header("Location");
+            Serial.println("[OTA] Redirección detectada. Saltando...");
+            http.end();
+            client.stop();
+            continue; 
+        }
+
+        if (httpCode == 200) {
+            int total = http.getSize();
+            File file = SD_MMC.open("/update.tar", "w");
+            if (!file) {
+                http.end();
+                client.stop();
+                return false;
+            }
+
+            WiFiClient* stream = http.getStreamPtr();
+            uint8_t buffer[1024];
+            int written = 0;
+            int len = total;
+
+            drawProgress("Descargando assets...", 0, total);
+
+            while (http.connected() && (len > 0 || len == -1)) {
+                size_t size = stream->available();
+                if (size) {
+                    int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
+                    file.write(buffer, c);
+                    written += c;
+                    if (len > 0) len -= c;
+                    drawProgress("Descargando assets...", written, total);
+                }
+                delay(1);
+            }
+            file.close();
+            http.end();
+            client.stop();
+
+            drawProgress("Extrayendo archivos...", 50, 100);
+            extractTar("/update.tar", "/");
+            SD_MMC.remove("/update.tar");
+            return true; // ÉXITO
+        }
+
+        if (httpCode == 404) {
+            drawMessage(String("Compilando... ") + String(15 - retries));
+            http.end();
+            client.stop();
+            delay(10000);
+            retries++;
+        } else {
+            // CUALQUIER OTRO ERROR (DNS, Timeout, etc): Ahora REINTENTA, no aborta
+            Serial.printf("[OTA] Error SD HTTP: %s (%d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            drawMessage("Reintentando Red...");
+            http.end();
+            client.stop();
+            delay(5000); // 5 segundos para que el router reviva
+            retries++;
+        }
+    }
     return false;
 }
 
 bool UpdateManager::performFirmwareUpdate() {
-    String fwUrl = getAssetUrl("firmware.bin");
-    
-    WiFiClientSecure client;
-    client.setInsecure();
-    HTTPClient http;
-    http.begin(client, fwUrl);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); 
+    String url = getAssetUrl("firmware.bin");
+    drawMessage("Buscando Firmware...");
+    int retries = 0;
 
-    int httpCode = http.GET();
-    if (httpCode != 200) {
-        Serial.printf("[OTA] Error descargando firmware.bin. Código HTTP: %d\n", httpCode);
-        http.end();
-        return false;
-    }
+    while (retries < 15) {
+        WiFiClientSecure client;
+        client.setInsecure();
+        client.setTimeout(10000);
+        
+        HTTPClient http;
+        const char* headerKeys[] = {"Location"};
+        http.collectHeaders(headerKeys, 1);
 
-    int contentLength = http.getSize();
-    bool canBegin = false;
-    if (contentLength > 0) {
-        canBegin = Update.begin(contentLength);
-    } else {
-        canBegin = Update.begin(UPDATE_SIZE_UNKNOWN);
-    }
-
-    if (!canBegin) {
-        Serial.println("[OTA] Error iniciando motor de Update en ESP32.");
-        http.end();
-        return false;
-    }
-
-    WiFiClient* stream = http.getStreamPtr();
-    size_t written = 0;
-    uint8_t buffer[1024];
-    int len = contentLength;
-
-    // Lazo robusto que funciona aunque el servidor no indique el tamaño total (len == -1)
-    while (http.connected() && (len > 0 || len == -1)) {
-        size_t size = stream->available();
-        if (size) {
-            int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
-            Update.write(buffer, c);
-            written += c;
-            if (len > 0) len -= c;
-            drawProgress("Flasheando TAMA...", written, contentLength);
+        if (!http.begin(client, url)) {
+            client.stop();
+            delay(2000);
+            retries++;
+            continue;
         }
-        delay(1);
-    }
 
-    bool success = Update.end(true);
-    http.end();
-    return success;
-}
+        int httpCode = http.GET();
 
-bool UpdateManager::performSDUpdate() {
-    String sdUrl = getAssetUrl("sd_files.tar");
-    
-    WiFiClientSecure client;
-    client.setInsecure();
-    HTTPClient http;
-    http.begin(client, sdUrl);
-    http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
-
-    int httpCode = http.GET();
-    if (httpCode != 200) {
-        http.end();
-        return false;
-    }
-
-    File file = SD_MMC.open("/update.tar", "w");
-    if (!file) {
-        http.end();
-        return false;
-    }
-
-    int total = http.getSize();
-    WiFiClient* stream = http.getStreamPtr();
-    uint8_t buffer[1024];
-    int written = 0;
-    int len = total;
-
-    // Lazo robusto para SD
-    while (http.connected() && (len > 0 || len == -1)) {
-        size_t size = stream->available();
-        if (size) {
-            int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
-            file.write(buffer, c);
-            written += c;
-            if (len > 0) len -= c;
-            drawProgress("Descargando assets...", written, total);
+        if (httpCode == 301 || httpCode == 302) {
+            url = http.header("Location");
+            Serial.println("[OTA] Redirección Firmware detectada...");
+            http.end();
+            client.stop();
+            continue; 
         }
-        delay(1);
-    }
-    file.close();
-    http.end();
 
-    drawProgress("Extrayendo archivos...", 50, 100);
-    extractTar("/update.tar", "/");
-    SD_MMC.remove("/update.tar");
-    return true;
+        if (httpCode == 200) {
+            int contentLength = http.getSize();
+            bool canBegin = (contentLength > 0) ? Update.begin(contentLength) : Update.begin(UPDATE_SIZE_UNKNOWN);
+
+            if (!canBegin) {
+                Serial.println("[OTA] Error iniciando motor Update.");
+                http.end();
+                client.stop();
+                return false;
+            }
+
+            WiFiClient* stream = http.getStreamPtr();
+            uint8_t buffer[1024];
+            size_t written = 0;
+            int len = contentLength;
+
+            drawProgress("Flasheando TAMA...", 0, contentLength);
+
+            while (http.connected() && (len > 0 || len == -1)) {
+                size_t size = stream->available();
+                if (size) {
+                    int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
+                    Update.write(buffer, c);
+                    written += c;
+                    if (len > 0) len -= c;
+                    drawProgress("Flasheando TAMA...", written, contentLength);
+                }
+                delay(1);
+            }
+
+            bool success = Update.end(true);
+            http.end();
+            client.stop();
+            return success;
+        }
+
+        if (httpCode == 404) {
+            drawMessage(String("Firmware... ") + String(15 - retries));
+            http.end();
+            client.stop();
+            delay(10000);
+            retries++;
+        } else {
+            // REINTENTO EN CORTES DE LUZ O RED
+            Serial.printf("[OTA] Error FW HTTP: %s (%d)\n", http.errorToString(httpCode).c_str(), httpCode);
+            drawMessage("Reintentando Red...");
+            http.end();
+            client.stop();
+            delay(5000);
+            retries++;
+        }
+    }
+    return false;
 }
 
 void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
@@ -218,7 +344,7 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
         for (int i = 0; i < 512; i++) {
             if (buffer[i] != 0) { allZero = false; break; }
         }
-        if (allZero) break; // Fin de archivo TAR detectado (bloque vacío)
+        if (allZero) break; 
 
         char filename[101];
         memset(filename, 0, sizeof(filename));
@@ -237,9 +363,9 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
         if (!fullPath.endsWith("/")) fullPath += "/";
         fullPath += String(filename);
 
-        if (typeflag == '5') { // Es un directorio
+        if (typeflag == '5') { 
             SD_MMC.mkdir(fullPath.c_str());
-        } else { // Es un archivo
+        } else { 
             int lastSlash = fullPath.lastIndexOf('/');
             if (lastSlash != -1) {
                 SD_MMC.mkdir(fullPath.substring(0, lastSlash).c_str());
@@ -257,7 +383,6 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
                 }
                 outFile.close();
             } else {
-                // Saltar el archivo en la lectura del TAR si no se pudo escribir
                 long blocksToSkip = (fileSize + 511) / 512;
                 tarFile.seek(tarFile.position() + blocksToSkip * 512);
                 continue; 

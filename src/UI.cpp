@@ -1,10 +1,10 @@
 // src/UI.cpp
 #include "UI.h"
 
-// Colores embebidos nativos en RGB565 para eliminar dependencia de colors.h
+// Colores embebidos nativos en RGB565
 #define TAMA_UI_BG  0xF6FA // Crema claro (#F5DFBF)
 #define TAMA_BROWN  0x4903 // Marrón oscuro (#4C2818)
-#define COLOR_GREEN 0x07E0 // Verde puro
+#define COLOR_GREEN 0x54A8 // Verde Stardew Valley tierra (#569440)
 #define MAT_BG      0x1042 // Gris oscuro
 #define MAT_OFFLINE 0x4208 // Gris medio/offline
 

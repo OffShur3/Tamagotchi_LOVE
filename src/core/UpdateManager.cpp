@@ -18,7 +18,6 @@ String UpdateManager::getCurrentVersion() {
 }
 
 bool UpdateManager::needMandatoryUpdate() {
-    // Forzar actualización si falta un archivo crítico, si no hay versión instalada, o si hay actualización disponible
     if (!SD_MMC.exists("/QR Network.png") || getCurrentVersion() == "v0.0.0") {
         return true;
     }
@@ -28,7 +27,6 @@ bool UpdateManager::needMandatoryUpdate() {
 bool UpdateManager::checkForUpdate() {
     if (WiFi.status() != WL_CONNECTED) return false;
 
-    // CRÍTICO: Cliente seguro ignorando certificados para no agotar la RAM
     WiFiClientSecure client;
     client.setInsecure(); 
 
@@ -43,7 +41,6 @@ bool UpdateManager::checkForUpdate() {
     if (httpCode == 200) {
         String payload = http.getString();
         
-        // Parseo ligero (Zero-Allocation) buscando el tag para ahorrar RAM
         int tagPos = payload.indexOf("\"tag_name\":\"");
         if (tagPos != -1) {
             tagPos += 12;
@@ -59,45 +56,20 @@ bool UpdateManager::checkForUpdate() {
                 return true;
             }
         }
-    } else {
-        Serial.printf("[OTA] Error consultando API de GitHub. HTTP Code: %d\n", httpCode);
     }
     http.end();
     return false;
 }
 
 String UpdateManager::getAssetUrl(const char* assetName) {
-    if (WiFi.status() != WL_CONNECTED) return "";
-
-    WiFiClientSecure client;
-    client.setInsecure();
-
-    HTTPClient http;
-    String url = "https://api.github.com/repos/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/latest";
-    http.begin(client, url);
-    http.addHeader("User-Agent", "Tamagotchi-ESP32");
-    int httpCode = http.GET();
-
-    String downloadUrl = "";
-    if (httpCode == 200) {
-        String payload = http.getString();
-        int assetPos = payload.indexOf(assetName);
-        if (assetPos != -1) {
-            int urlPos = payload.indexOf("\"browser_download_url\":\"", assetPos);
-            if (urlPos != -1) {
-                urlPos += 24;
-                int urlEnd = payload.indexOf("\"", urlPos);
-                downloadUrl = payload.substring(urlPos, urlEnd);
-                downloadUrl.replace("\\/", "/"); // Limpiar escapes del JSON
-            }
-        }
-    }
-    http.end();
-    return downloadUrl;
+    // OPTIMIZACIÓN GIGANTE: 
+    // Como ya sabemos la versión exacta que necesitamos, predecimos la URL de GitHub.
+    // Esto evita hacer llamadas extra a la API, eliminando la sobrecarga de RAM y el error "Bad file number" de los sockets.
+    return "https://github.com/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/download/" + _latestVersion + "/" + String(assetName);
 }
 
 void UpdateManager::drawProgress(const String& title, int progress, int total) {
-    _cfg.gfx->fillScreen(0x18C3);
+    _cfg.gfx->fillScreen(0x18C3); // Fondo azul rústico
     _cfg.gfx->setTextColor(0xFFFF);
     _cfg.gfx->setTextSize(1);
     
@@ -107,9 +79,14 @@ void UpdateManager::drawProgress(const String& title, int progress, int total) {
     
     int barW = 132;
     _cfg.gfx->drawRect(20, 130, barW, 20, 0xFFFF);
+    
     if (total > 0) {
         int fill = (barW - 4) * progress / total;
-        _cfg.gfx->fillRect(22, 132, fill, 16, 0x07E0);
+        _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8); // Nuevo verde Stardew
+    } else {
+        // Si el servidor (AWS S3) no reporta el tamaño, animamos la barra con el progreso infinito
+        int fill = (progress % 102400) * (barW - 4) / 102400; // Se reinicia cada 100KB
+        _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8);
     }
 }
 
@@ -132,15 +109,11 @@ bool UpdateManager::performFullUpdate() {
 
 bool UpdateManager::performFirmwareUpdate() {
     String fwUrl = getAssetUrl("firmware.bin");
-    if (fwUrl.length() == 0) return false;
-
+    
     WiFiClientSecure client;
     client.setInsecure();
-
     HTTPClient http;
     http.begin(client, fwUrl);
-    
-    // CRÍTICO para GitHub Releases: Seguir la redirección a los servidores S3 de AWS
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); 
 
     int httpCode = http.GET();
@@ -151,12 +124,14 @@ bool UpdateManager::performFirmwareUpdate() {
     }
 
     int contentLength = http.getSize();
-    if (contentLength <= 0) {
-        http.end();
-        return false;
+    bool canBegin = false;
+    if (contentLength > 0) {
+        canBegin = Update.begin(contentLength);
+    } else {
+        canBegin = Update.begin(UPDATE_SIZE_UNKNOWN);
     }
 
-    if (!Update.begin(contentLength)) {
+    if (!canBegin) {
         Serial.println("[OTA] Error iniciando motor de Update en ESP32.");
         http.end();
         return false;
@@ -165,40 +140,33 @@ bool UpdateManager::performFirmwareUpdate() {
     WiFiClient* stream = http.getStreamPtr();
     size_t written = 0;
     uint8_t buffer[1024];
+    int len = contentLength;
 
-    while (http.connected() && (written < contentLength)) {
+    // Lazo robusto que funciona aunque el servidor no indique el tamaño total (len == -1)
+    while (http.connected() && (len > 0 || len == -1)) {
         size_t size = stream->available();
         if (size) {
             int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
             Update.write(buffer, c);
             written += c;
+            if (len > 0) len -= c;
             drawProgress("Flasheando TAMA...", written, contentLength);
         }
         delay(1);
     }
 
-    bool success = false;
-    if (written == contentLength) {
-        success = Update.end(true);
-    } else {
-        Update.end(false);
-    }
-
+    bool success = Update.end(true);
     http.end();
     return success;
 }
 
 bool UpdateManager::performSDUpdate() {
     String sdUrl = getAssetUrl("sd_files.tar");
-    if (sdUrl.length() == 0) return false;
-
+    
     WiFiClientSecure client;
     client.setInsecure();
-
     HTTPClient http;
     http.begin(client, sdUrl);
-    
-    // CRÍTICO para GitHub Releases
     http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
 
     int httpCode = http.GET();
@@ -217,13 +185,16 @@ bool UpdateManager::performSDUpdate() {
     WiFiClient* stream = http.getStreamPtr();
     uint8_t buffer[1024];
     int written = 0;
+    int len = total;
 
-    while (http.connected() && (written < total)) {
+    // Lazo robusto para SD
+    while (http.connected() && (len > 0 || len == -1)) {
         size_t size = stream->available();
         if (size) {
             int c = stream->readBytes(buffer, ((size > sizeof(buffer)) ? sizeof(buffer) : size));
             file.write(buffer, c);
             written += c;
+            if (len > 0) len -= c;
             drawProgress("Descargando assets...", written, total);
         }
         delay(1);
@@ -292,8 +263,6 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
                 continue; 
             }
             
-            // Los archivos dentro de un TAR siempre tienen un relleno (padding) de nulos
-            // hasta completar un bloque exacto de 512 bytes. Esto limpia ese sobrante.
             long padding = (512 - (fileSize % 512)) % 512;
             if (padding > 0) {
                 tarFile.seek(tarFile.position() + padding);

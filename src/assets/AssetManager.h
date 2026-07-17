@@ -9,6 +9,7 @@
 
 class AssetManager {
 public:
+    bool loadPNGDirectToBuffer(const std::string& path, uint16_t* destBuffer);
     static AssetManager& getInstance() {
         static AssetManager instance;
         return instance;

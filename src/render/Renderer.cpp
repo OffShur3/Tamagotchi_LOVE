@@ -8,7 +8,7 @@ extern bool debugMode;
 
 Renderer::Renderer(uint16_t w, uint16_t h) 
     : width(w), height(h), framebuffer(nullptr), backgroundBuffer(nullptr),
-      petBackingStore(nullptr), petX(0), petY(0), petW(0), petH(0), petBackingStoreSaved(false) {
+      petX(0), petY(0), petW(0), petH(0), petBackingStoreSaved(false) { 
     
     size_t size = width * height * sizeof(uint16_t);
 
@@ -36,7 +36,7 @@ Renderer::Renderer(uint16_t w, uint16_t h)
 Renderer::~Renderer() {
     if (framebuffer) free(framebuffer);
     if (backgroundBuffer) free(backgroundBuffer);
-    if (petBackingStore) free(petBackingStore);
+    if (bgFile) bgFile.close(); // <--- CERRAR ARCHIVO EN LUGAR DE LIBERAR RAM
 }
 
 void Renderer::clear(uint16_t clearColor) {
@@ -127,23 +127,21 @@ void Renderer::drawToFramebufferOnce(const std::shared_ptr<Texture>& tex, int16_
 
 void Renderer::savePetBackingStore(int16_t px, int16_t py, int16_t pw, int16_t ph) {
     petX = px; petY = py; petW = pw; petH = ph;
-    size_t cropSize = petW * petH * sizeof(uint16_t);
 
-    if (petBackingStore) free(petBackingStore);
-    petBackingStore = (uint16_t*)malloc(cropSize);
-
-    if (petBackingStore && framebuffer) {
+    // Crear archivo binario en modo lectura/escritura (w+)
+    bgFile = SD_MMC.open("/tama/tmp_bg.bin", "w+");
+    
+    if (bgFile && framebuffer) {
         for (int16_t y = 0; y < petH; ++y) {
-            for (int16_t x = 0; x < petW; ++x) {
-                int16_t fbX = petX + x;
-                int16_t fbY = petY + y;
-                if (fbX >= 0 && fbX < width && fbY >= 0 && fbY < height) {
-                    petBackingStore[y * petW + x] = framebuffer[fbY * width + fbX];
-                }
+            int16_t fbY = petY + y;
+            if (fbY >= 0 && fbY < height) {
+                // Escribir la fila cruda directo del framebuffer a la SD
+                bgFile.write((uint8_t*)&framebuffer[fbY * width + petX], petW * sizeof(uint16_t));
             }
         }
+        bgFile.flush();
         petBackingStoreSaved = true;
-        Serial.println("[RENDERER] Backing Store de mascota guardado de forma segura en SRAM (41 KB).");
+        Serial.println("[RENDERER] Backing Store delegado a SD (/tama/tmp_bg.bin). Ahorro masivo: 41 KB liberados.");
     }
 }
 
@@ -155,16 +153,16 @@ void Renderer::render(const std::vector<std::shared_ptr<RenderObject>>& objects)
         memcpy(framebuffer, backgroundBuffer, width * height * sizeof(uint16_t));
     } else {
         // MODO SRAM OPTIMIZADO (Sin PSRAM)
-        if (petBackingStoreSaved && petBackingStore) {
-            // Restaurar los píxeles de fondo originales debajo de la mascota antes de dibujar el frame
+        if (petBackingStoreSaved && bgFile) {
+            bgFile.seek(0); // Rebobinar el archivo de la SD
             for (int16_t y = 0; y < petH; ++y) {
                 int16_t fbY = petY + y;
-                if (fbY < 0 || fbY >= height) continue;
-                for (int16_t x = 0; x < petW; ++x) {
-                    int16_t fbX = petX + x;
-                    if (fbX < 0 || fbX >= width) continue;
-                    framebuffer[fbY * width + fbX] = petBackingStore[y * petW + x];
+                if (fbY < 0 || fbY >= height) {
+                    bgFile.seek(bgFile.position() + (petW * sizeof(uint16_t))); // Saltar fila
+                    continue;
                 }
+                // Leer la fila desde la SD y escupirla en el Framebuffer
+                bgFile.read((uint8_t*)&framebuffer[fbY * width + petX], petW * sizeof(uint16_t));
             }
         } else {
             // --- FALLBACK DE SEGURIDAD ---

@@ -13,6 +13,7 @@
 #include "core/TamaNetworkManager.h" 
 #include "core/UpdateManager.h"
 #include "core/touch_axs5106.h"
+#include "UI.h"
 
 // --- Pines físicos reales de Waveshare ESP32-S3 Touch LCD 1.47" ---
 #define TFT_DC   45
@@ -26,31 +27,50 @@
 #define SD_CMD   15
 #define SD_D0    17
 
-// Paleta de Colores de Interfaz (Stardew Valley Style)
-#define TAMA_UI_BG  0xF6FA 
-#define TAMA_BROWN  0x4903 
-#define TAMA_GREEN  0x2444 
-#define TAMA_DARK_S 0x10A2 
+#define BOOT_PIN  0 
 
-// Máquina de estados de conexión del Kernel
+// Constantes de color físicas para la intro de bienvenida
+#define RETRO_BG    0x1042 // MAT_BG
+#define RETRO_WHITE 0xFFFF // BGR_WHITE
+
 enum KernelState {
     STATE_CONNECTING,
     STATE_GAMEPLAY,
     STATE_POPUP,
-    STATE_PORTAL
+    STATE_PORTAL,
+    STATE_POPUP_UPDATE
 };
+
+// --- DECLARACIONES AVANZADAS (Prototipos de función para el Compilador) ---
+void* pngOpen(const char *filename, int32_t *size);
+void pngClose(void *handle);
+int32_t pngRead(PNGFILE *handle, uint8_t *buffer, int32_t length);
+int32_t pngSeek(PNGFILE *handle, int32_t position);
+int qrDrawCallback(PNGDRAW *pDraw);
+bool leerTouch(uint16_t &x, uint16_t &y);
+bool detectarSwipeRight();
+bool checkExitCallback();
+int leerClickPopup();
+int leerClickPopupUpdate();
+bool esperarSD();
+void irADormir();
+bool cargarRedesSD();
+void dibujarPopupStardew();
+void dibujarPantallaPortal();
 
 PNG png;
 WiFiMulti wifiMulti; 
+std::vector<std::pair<String, String>> redesGuardadas;
+int intentoRedActual = 0;
+unsigned long ultimoIntentoWiFi = 0;
 
-// Búfer de línea global estático de 512 píxeles
 uint16_t globalLineBuffer[512];
 
 // Inicializar bus SPI de pantalla
 Arduino_DataBus *bus = new Arduino_ESP32SPI(TFT_DC, TFT_CS, TFT_SCLK, TFT_MOSI);
 Arduino_GFX *gfx = new Arduino_ST7789(bus, TFT_RST, 0, false, 172, 320, 34, 0, 34, 0);
 
-// Puntero dinámico al juego en Heap
+// Puntero dinámico a la clase base de juego
 Game* game = nullptr;
 
 bool debugMode = false;
@@ -58,7 +78,22 @@ KernelState currentState = STATE_CONNECTING;
 uint32_t connectionStartTime = 0;
 uint32_t popupLaunchTime = 0; 
 
-// Callbacks requeridos para el renderizado del QR de red
+bool updateAvailable = false;
+String latestVersion = "";
+bool updateInProgress = false;
+bool mandatoryUpdate = false;
+
+volatile bool peticionDormir = false;
+
+void IRAM_ATTR isrBotonBoot() {
+    static unsigned long lastInterruptTime = 0;
+    unsigned long interruptTime = millis();
+    if (interruptTime - lastInterruptTime > 200) { 
+        peticionDormir = true;
+    }
+    lastInterruptTime = interruptTime;
+}
+
 void* pngOpen(const char *filename, int32_t *size) {
     File *f = new File(SD_MMC.open(filename, "r"));
     if (!f || !*f) return nullptr;
@@ -99,7 +134,7 @@ bool leerTouch(uint16_t &x, uint16_t &y) {
     return false;
 }
 
-// Detección de Swipe de Izquierda a Derecha (Swipe Right) para salir
+// Detección de Swipe de Izquierda a Derecha (Swipe Right) para salir del portal
 bool detectarSwipeRight() {
     uint16_t startX = 0, startY = 0;
     uint16_t curX = 0, curY = 0;
@@ -120,68 +155,109 @@ bool detectarSwipeRight() {
     return false;
 }
 
-// Inyección de función de salida para NetworkManager (Swipe de Izquierda a Derecha)
 bool checkExitCallback() {
     return detectarSwipeRight();
 }
 
-void imprimirCentrado(const char* texto, int y, int size, uint16_t color) {
-    gfx->setTextSize(size);
-    gfx->setTextColor(color);
-    int anchoPorChar = size * 6;
-    int anchoTexto = strlen(texto) * anchoPorChar;
-    int x = (172 - anchoTexto) / 2;
-    gfx->setCursor(x, y);
-    gfx->println(texto);
+// Filtro táctil contra toques fantasma de calibración de arranque en el popup
+int leerClickPopup() {
+    if (millis() - popupLaunchTime < 500) {
+        return 0; 
+    }
+    uint16_t tx, ty;
+    if (leerTouch(tx, ty)) {
+        int click = UIManager::getStardewPopupClick(tx, ty);
+        if (click > 0) {
+            unsigned long pressTime = millis();
+            while (leerTouch(tx, ty) && (millis() - pressTime < 2000)) { 
+                delay(10); 
+            }
+            return click;
+        }
+    }
+    return 0;
+}
+
+// Filtro táctil para el menú de actualización
+int leerClickPopupUpdate() {
+    if (millis() - popupLaunchTime < 500) {
+        return 0; 
+    }
+    uint16_t tx, ty;
+    if (leerTouch(tx, ty)) {
+        int click = UIManager::getUpdatePopupClick(tx, ty);
+        if (click > 0) {
+            unsigned long pressTime = millis();
+            while (leerTouch(tx, ty) && (millis() - pressTime < 2000)) { 
+                delay(10); 
+            }
+            return click;
+        }
+    }
+    return 0;
+}
+
+// Esperar a que la tarjeta SD sea insertada físicamente (Hardware Safety)
+bool esperarSD() {
+    gfx->fillScreen(RETRO_BG);
+    imprimirCentrado(gfx, "SD", 130, 2, RETRO_WHITE);
+    imprimirCentrado(gfx, "no detectada", 160, 2, RETRO_WHITE);
+    imprimirCentrado(gfx, "Por favor insertela", 190, 1, RETRO_WHITE);
+       
+    while (true) {
+        SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
+        if (SD_MMC.begin("/sdcard", true)) {
+            return true;
+        }
+        delay(500);
+    }
+}
+
+// Guardado persistente y apagado total de hardware (Deep Sleep)
+void irADormir() {
+    Serial.println("[POWER] Guardando y entrando en Deep Sleep...");
+    
+    // CORRECCIÓN: Guardar partida directamente sobre el puntero base Game*
+    if (game) {
+        game->saveGame(); 
+    }
+
+    digitalWrite(TFT_BL, LOW);
+    gfx->displayOff();
+
+    esp_sleep_enable_ext0_wakeup((gpio_num_t)BOOT_PIN, 0); 
+    
+    esp_deep_sleep_start();
+}
+
+bool cargarRedesSD() {
+    if (!SD_MMC.exists("/tama/config/wifi.json")) return false;
+
+    File file = SD_MMC.open("/tama/config/wifi.json", "r");
+    if (!file) return false;
+
+    StaticJsonDocument<1536> doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+    if (error) return false;
+
+    redesGuardadas.clear();
+    JsonArray arr = doc.as<JsonArray>();
+    
+    for (JsonObject obj : arr) {
+        const char* ssid = obj["ssid"];
+        const char* pass = obj["pass"];
+        if (ssid && strlen(ssid) > 0) {
+            redesGuardadas.push_back({String(ssid), String(pass)});
+            Serial.printf("[KERNEL] Red encolada: %s\n", ssid);
+        }
+    }
+    return !redesGuardadas.empty();
 }
 
 // Renderizador del Popup de Stardew Valley en pantalla (Deadlock-Free)
 void dibujarPopupStardew() {
-    gfx->fillRoundRect(14, 84, 148, 156, 12, TAMA_DARK_S);
-    gfx->fillRoundRect(10, 80, 152, 160, 12, TAMA_BROWN); 
-    gfx->fillRoundRect(13, 83, 146, 154, 10, TAMA_UI_BG);
-
-    imprimirCentrado("CONEXION", 95, 1, TAMA_BROWN);
-    imprimirCentrado("FALLIDA", 108, 1, TAMA_BROWN);
-
-    // Botón Online (Verde)
-    gfx->fillRoundRect(22, 130, 128, 35, 8, TAMA_BROWN); 
-    gfx->fillRoundRect(24, 132, 124, 31, 6, TAMA_GREEN); 
-    imprimirCentrado("Configurar", 142, 1, 0xFFFF);
-
-    // Botón Offline (Marrón secundario)
-    gfx->fillRoundRect(22, 180, 128, 35, 8, TAMA_BROWN); 
-    gfx->fillRoundRect(24, 182, 124, 31, 6, 0x9306); 
-    imprimirCentrado("Jugar Offline", 192, 1, 0xFFFF);
-}
-
-// Lector de toque sobre las zonas de los botones del Popup con timeout de seguridad
-int leerClickPopup() {
-    // Evitar cualquier lectura si no ha transcurrido medio segundo (Filtro de ruido en arranque)
-    if (millis() - popupLaunchTime < 500) {
-        return 0; 
-    }
-
-    uint16_t tx, ty;
-    if (leerTouch(tx, ty)) {
-        // Botón superior (y: 130-165, x: 22-150) -> Configurar (Online)
-        if (ty >= 130 && ty <= 165 && tx >= 22 && tx <= 150) {
-            unsigned long pressTime = millis();
-            while (leerTouch(tx, ty) && (millis() - pressTime < 2000)) { 
-                delay(10); 
-            }
-            return 1;
-        }
-        // Botón inferior (y: 180-215, x: 22-150) -> Jugar Offline
-        if (ty >= 180 && ty <= 215 && tx >= 22 && tx <= 150) {
-            unsigned long pressTime = millis();
-            while (leerTouch(tx, ty) && (millis() - pressTime < 2000)) { 
-                delay(10); 
-            }
-            return 2;
-        }
-    }
-    return 0;
+    UIManager::drawStardewPopup(gfx);
 }
 
 // Pintar la pantalla de instrucciones del Portal Cautivo polida (Deadlock-Free)
@@ -190,8 +266,8 @@ void dibujarPantallaPortal() {
 
     if (!SD_MMC.exists("/QR Network.png")) {
         Serial.println("[PORTAL] ERROR: /QR Network.png no encontrado en la SD");
-        imprimirCentrado("QR no encontrado", 50, 1, 0xF800);
-        imprimirCentrado("Revisa la SD", 70, 1, 0xF800);
+        imprimirCentrado(gfx, "QR no encontrado", 50, 1, 0xF800);
+        imprimirCentrado(gfx, "Revisa la SD", 70, 1, 0xF800);
     } else {
         int rc = png.open("/QR Network.png", pngOpen, pngClose, pngRead, pngSeek, qrDrawCallback);
         if (rc == PNG_SUCCESS) {
@@ -199,133 +275,107 @@ void dibujarPantallaPortal() {
             png.close();
             Serial.println("[PORTAL] QR decodificado con exito");
         } else {
-            imprimirCentrado("Error decodificador", 50, 1, 0xF800);
+            imprimirCentrado(gfx, "Error decodificador", 50, 1, 0xF800);
         }
     }
 
     // Textos informativos estilizados
-    imprimirCentrado("Conecta tu celular a:", 135, 1, 0xFEE0);
-    imprimirCentrado("TamaConfig", 150, 2, 0xFFFF);
+    imprimirCentrado(gfx, "Conecta tu celular a:", 135, 1, 0xFEE0);
+    imprimirCentrado(gfx, "TamaConfig", 150, 2, 0xFFFF);
     
-    imprimirCentrado("Admite conexion", 185, 1, 0x07E0);
-    imprimirCentrado("sin Internet", 200, 1, 0x07E0);
+    imprimirCentrado(gfx, "Admite conexion", 185, 1, 0x07E0);
+    imprimirCentrado(gfx, "sin Internet", 200, 1, 0x07E0);
     
-    imprimirCentrado("Entra al navegador", 230, 1, 0xFFFF);
-    imprimirCentrado("y elige tu WiFi", 245, 1, 0xFFFF);
+    imprimirCentrado(gfx, "Entra al navegador", 230, 1, 0xFFFF);
+    imprimirCentrado(gfx, "y elige tu WiFi", 245, 1, 0xFFFF);
     
-    imprimirCentrado("<3", 270, 2, 0xFFFF);
-}
-
-// --- CARGA DE REDES CON RETORNO DE ESTADO ---
-bool cargarRedesSD() {
-    if (!SD_MMC.exists("/tama/config/wifi.json")) {
-        Serial.println("[KERNEL] No se encontro /tama/config/wifi.json en la SD.");
-        return false;
-    }
-
-    File file = SD_MMC.open("/tama/config/wifi.json", "r");
-    if (!file) return false;
-
-    StaticJsonDocument<1536> doc;
-    DeserializationError error = deserializeJson(doc, file);
-    file.close();
-
-    if (error) {
-        Serial.println("[KERNEL] Error decodificando el archivo wifi.json.");
-        return false;
-    }
-
-    JsonArray arr = doc.as<JsonArray>();
-    int redesRegistradas = 0;
-    
-    for (JsonObject obj : arr) {
-        const char* ssid = obj["ssid"];
-        const char* pass = obj["pass"];
-        if (ssid && strlen(ssid) > 0) {
-            wifiMulti.addAP(ssid, pass);
-            Serial.printf("[KERNEL] Red registrada en Multi-WiFi: %s\n", ssid);
-            redesRegistradas++;
-        }
-    }
-    return (redesRegistradas > 0);
+    imprimirCentrado(gfx, "<3", 270, 2, 0xFFFF);
 }
 
 void setup() {
     Serial.begin(115200);
+    delay(1000);
 
-    // Inicializar el bus I2C y el chip táctil AXS5106 en los pines reales 42 y 41
+    // Inicialización del digitalizador táctil
     touch_init();
 
-    Preferences prefs;
-    prefs.begin("tama-kernel", false); 
-    debugMode = prefs.getBool("debug", false);
-    prefs.end();
-
+    // Configurar interrupción física de ahorro de energía (Deep Sleep)
     pinMode(TFT_BL, OUTPUT);
+    pinMode(BOOT_PIN, INPUT_PULLUP); 
+    attachInterrupt(digitalPinToInterrupt(BOOT_PIN), isrBotonBoot, FALLING);
     digitalWrite(TFT_BL, HIGH);
-
+    
     if (!gfx->begin()) {
         Serial.println("Error inicializando pantalla física.");
     }
     
     bus->beginWrite();
     bus->writeCommand(0x36);
-    bus->write(0x48); // Orientación de hardware vertical
+    bus->write(0x48); 
     bus->endWrite();
 
-    gfx->fillScreen(0x0000);
+    // --- PANTALLA DE INTRO BIENVENIDA ---
+    gfx->fillScreen(RETRO_BG);
+    gfx->setTextColor(RETRO_WHITE);
+    gfx->setTextSize(2);
+    imprimirCentrado(gfx, "This is 4", 130, 2, RETRO_WHITE);
+    imprimirCentrado(gfx, "u babe...", 160, 2, RETRO_WHITE);
+    delay(1500);
 
-    // Inicializar lector de tarjetas SD mediante SD_MMC
-    SD_MMC.setPins(SD_CLK, SD_CMD, SD_D0);
-    if (!SD_MMC.begin("/sdcard", true)) {
-        Serial.println("Advertencia: No se pudo montar la tarjeta SD mediante SD_MMC.");
+    esperarSD();
+
+    Preferences prefs;
+    prefs.begin("tama-kernel", false); 
+    debugMode = prefs.getBool("debug", false);
+    prefs.end();
+
+    if (SD_MMC.exists("/DEBUG.txt")) {
+        debugMode = true;
+        Serial.println("[KERNEL] Archivo /DEBUG.txt detectado en la SD. MODO DEBUG ACTIVADO.");
     } else {
-        Serial.println("Tarjeta SD (SD_MMC) montada correctamente.");
-        AssetManager::getInstance().setFileSystem(&SD_MMC);
-
-        // PERSISTENCIA NIX: Comprobar presencia física de DEBUG.txt en la tarjeta SD
-        if (SD_MMC.exists("/DEBUG.txt")) {
-            debugMode = true;
-            Serial.println("[KERNEL] Archivo /DEBUG.txt detectado en la SD. MODO DEBUG ACTIVADO.");
-        } else {
-            debugMode = false;
-        }
+        debugMode = false;
     }
 
     AssetManager::getInstance().setPNG(&png);
+    AssetManager::getInstance().setFileSystem(&SD_MMC); 
 
-    // 1. ASIGNACIÓN DINÁMICA E INICIALIZACIÓN DEL JUEGO
+    // 2. CREACIÓN DINÁMICA DEL JUEGO
     game = new Game(172, 320);
     game->init();
 
-    // --- OPTIMIZACIÓN DE UX: ENVIAR EL PRIMER FRAME DE FORMA INMEDIATA ---
-    // Esto dibuja el fondo y la mascota en pantalla en menos de 200 ms de boot,
-    // garantizando que el usuario vea la mascota y eliminando cualquier retraso visual.
+    // Enviar el primer frame a pantalla para una transición ultra-fluida antes de encender WiFi
     game->tick();
     game->flush(gfx);
 
-    // 2. SOLO AHORA QUE LA PANTALLA YA SE MUESTRA PERFECTA, INICIAMOS LA RED
-    Serial.println("[KERNEL] Cargando multiples redes WiFi guardadas...");
+    // 3. CARGA DE REDES MULTI-WIFI
+    Serial.println("[KERNEL] Iniciando conexion WiFi en background...");
     WiFi.mode(WIFI_STA);
     
     bool tieneRedes = cargarRedesSD();
 
     if (tieneRedes) {
-        // Modo Conectando: Iniciar negociación no bloqueante en segundo plano mientras la mascota se anima
-        wifiMulti.run();
+        // Iniciar conexión asíncrona a la primera red (NO BLOQUEA)
+        WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
+        ultimoIntentoWiFi = millis();
         connectionStartTime = millis();
         currentState = STATE_CONNECTING;
     } else {
-        // Modo Sin Redes: Desactivar WiFi instantáneamente y tirar el Popup de Stardew sobre el fondo que ya dibujamos
-        Serial.println("[KERNEL] No se detectaron redes validas. Saltando al Popup de inmediato.");
+        Serial.println("[KERNEL] No se detectaron redes validas. Saltando al Popup.");
         WiFi.mode(WIFI_OFF);
         currentState = STATE_POPUP;
-        dibujarPopupStardew(); // El popup se dibuja encima del juego renderizado
-        popupLaunchTime = millis(); // Iniciar cronómetro contra toques de calibración
+        delay(100); 
+        UIManager::drawStardewPopup(gfx);
+        popupLaunchTime = millis();
     }
 }
 
 void loop() {
+    // 1. Revisar solicitud de interrupción de suspensión (Deep Sleep)
+    if (peticionDormir) {
+        peticionDormir = false; 
+        irADormir();
+    }
+
     // --- TIME SLICING: SOLO RENDERIZAR SI ESTAMOS EN GAMEPLAY O CONECTANDO ---
     if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_CONNECTING)) {
         game->tick();
@@ -339,47 +389,146 @@ void loop() {
                 Serial.println("[KERNEL] WiFi conectado con exito.");
                 currentState = STATE_GAMEPLAY;
             } else {
-                wifiMulti.run();
+                // Si pasaron 5 segundos y no conectó, intentar con la siguiente red de la lista
+                if (millis() - ultimoIntentoWiFi > 5000) {
+                    intentoRedActual++;
+                    if (intentoRedActual < redesGuardadas.size()) {
+                        Serial.printf("[KERNEL] Intentando con red: %s\n", redesGuardadas[intentoRedActual].first.c_str());
+                        WiFi.disconnect();
+                        WiFi.begin(redesGuardadas[intentoRedActual].first.c_str(), redesGuardadas[intentoRedActual].second.c_str());
+                        ultimoIntentoWiFi = millis();
+                    } else {
+                        intentoRedActual = 0; // Volver a empezar la lista
+                        ultimoIntentoWiFi = millis();
+                    }
+                }
             }
 
-            // Timeout de 15 segundos para dar margen al escaneo de múltiples redes
             if (millis() - connectionStartTime > 15000) {
                 Serial.println("[KERNEL] Timeout de WiFi excedido. Lanzando Popup interactivo.");
-                WiFi.mode(WIFI_OFF); // Apagar WiFi de inmediato para liberar RAM
+                WiFi.mode(WIFI_OFF);
                 currentState = STATE_POPUP;
-                dibujarPopupStardew(); // Dibujar el Popup estilo Stardew Valley
+                UIManager::drawStardewPopup(gfx);
                 popupLaunchTime = millis();
             }
             break;
         }
 
         case STATE_GAMEPLAY: {
+            // --- ACTUALIZACIÓN OBLIGATORIA AL INICIO ---
+            static bool mandatoryUpdateDone = false;
+            if (!mandatoryUpdateDone && WiFi.status() == WL_CONNECTED) {
+                mandatoryUpdateDone = true;
+                
+                UpdateManager::Config updateCfg = {
+                    .gfx = gfx,
+                    .githubUser = "OffShur3",
+                    .githubRepo = "Tamagotchi_LOVE",
+                    .currentVersionPath = "/version.txt",
+                    .checkIntervalMs = 300000
+                };
+                UpdateManager updateManager(updateCfg);
+                updateManager.checkForUpdate();
+
+                if (updateManager.needMandatoryUpdate()) {
+                    Serial.println("[MAIN] Actualización obligatoria requerida");
+                    updateAvailable = true;
+                    mandatoryUpdate = true;
+                }
+            }
+
+            // Comprobación periódica automática de actualizaciones cada 5 min (300000 ms)
+            static unsigned long lastUpdateCheck = 0;
+            if (WiFi.status() == WL_CONNECTED && !updateInProgress && !updateAvailable &&
+                (millis() - lastUpdateCheck > 300000)) {
+                Serial.println("[MAIN] Verificando actualizaciones...");
+                lastUpdateCheck = millis();
+
+                UpdateManager::Config updateCfg = {
+                    .gfx = gfx,
+                    .githubUser = "OffShur3",
+                    .githubRepo = "Tamagotchi_LOVE",
+                    .currentVersionPath = "/version.txt",
+                    .checkIntervalMs = 300000
+                };
+                UpdateManager updateManager(updateCfg);
+                if (updateManager.checkForUpdate()) {
+                    Serial.println("[MAIN] Nueva version disponible!");
+                    updateAvailable = true;
+                    latestVersion = updateManager.getLatestVersion();
+                }
+            }
+
+            if (updateAvailable && !updateInProgress) {
+                UIManager::drawUpdateBadge(gfx, 16, 16, 8); 
+                
+                uint16_t tx, ty;
+                if (leerTouch(tx, ty) && UIManager::isTouchingBadge(tx, ty, 16, 16, 14)) {
+                    while (leerTouch(tx, ty)) { delay(10); } 
+                    
+                    currentState = STATE_POPUP_UPDATE;
+                    UIManager::drawUpdatePopup(gfx, "NUEVA VERSION", latestVersion.c_str());
+                    popupLaunchTime = millis();
+                }
+            }
             break;
         }
 
-        case STATE_POPUP: {
-            // El juego está pausado de forma completa y segura en el bus SPI
-            int seleccion = leerClickPopup();
-            if (seleccion == 1) { // "Configurar" (Online)
-                Serial.println("[KERNEL] Cargando Portal Cautivo...");
-                currentState = STATE_PORTAL;
+        case STATE_POPUP_UPDATE: {
+            int click = leerClickPopupUpdate();
+            if (click == 1) { 
+                Serial.println("[MAIN] Iniciando actualizacion completa. Desalojando RAM...");
                 
-                // --- DESALOJAR JUEGO Y RENDERER COMPLETO DE LA RAM DE INMEDIATO ---
                 if (game) {
-                    delete game; // Libera framebuffer y backing store de inmediato (151 KB de RAM recuperados)
+                    delete game;
                     game = nullptr;
                 }
                 SceneManager::getInstance().changeScene(nullptr);
                 AssetManager::getInstance().clearUnused();
 
-                // Dibujar la interfaz del portal cautivo
+                UpdateManager::Config updateCfg = {
+                    .gfx = gfx,
+                    .githubUser = "OffShur3",
+                    .githubRepo = "Tamagotchi_LOVE",
+                    .currentVersionPath = "/version.txt",
+                    .checkIntervalMs = 300000
+                };
+                UpdateManager updateManager(updateCfg);
+                updateManager.performFullUpdate(); 
+            }
+            else if (click == 2) { 
+                Serial.println("[MAIN] Actualización pospuesta.");
+                updateAvailable = false;
+                currentState = STATE_GAMEPLAY;
+                
+                // CORRECCIÓN DEFINITIVA: Llamamos al método virtual de la clase base sin casts
+                if (game) {
+                    game->redraw();
+                }
+            }
+            break;
+        }
+
+        case STATE_POPUP: {
+            int seleccion = leerClickPopup();
+            if (seleccion == 1) { 
+                Serial.println("[KERNEL] Cargando Portal Cautivo...");
+                currentState = STATE_PORTAL;
+                
+                if (game) {
+                    delete game; 
+                    game = nullptr;
+                }
+                SceneManager::getInstance().changeScene(nullptr);
+                AssetManager::getInstance().clearUnused();
+
                 dibujarPantallaPortal();
                 
-                // Configuración con credenciales requeridas por el usuario
                 TamaNetworkManager::Config netCfg = {
                     .gfx = gfx,
                     .png = &png,
                     .qrPath = "/QR Network.png",
+                    .jsonPath = "/tama/config/wifi.json",
                     .apSSID = "TamaConfig",
                     .apPassword = "iluvUiluvU<3",
                     .pngOpen = pngOpen,
@@ -389,20 +538,21 @@ void loop() {
                     .pngDraw = qrDrawCallback,
                     .checkExit = checkExitCallback
                 };
-                TamaNetworkManager netManager(netCfg);
-                netManager.begin();
-                bool completado = netManager.runCaptivePortal();
+                TamaNetworkManager* netManager = new TamaNetworkManager(netCfg);
+                netManager->begin();
+                bool completado = netManager->runCaptivePortal();
 
                 if (!completado) {
-                    // --- FILOSOFÍA NIX: RESTAURACIÓN MEDIANTE REINICIO ULTRA-RÁPIDO ---
                     Serial.println("[KERNEL] Configuración cancelada. Reiniciando de forma segura...");
+                    delete netManager;
                     delay(500);
-                    ESP.restart();
+                    ESP.restart(); 
                 } else {
+                    delete netManager;
                     ESP.restart();
                 }
             }
-            else if (seleccion == 2) { // "Jugar Offline"
+            else if (seleccion == 2) { 
                 Serial.println("[KERNEL] Seleccionado modo Offline. Continuando...");
                 currentState = STATE_GAMEPLAY;
             }
@@ -414,7 +564,6 @@ void loop() {
         }
     }
 
-    // Escucha de comandos Serial (Case-Insensitive)
     if (Serial.available()) {
         String cmd = Serial.readStringUntil('\n');
         cmd.trim();
@@ -437,6 +586,16 @@ void loop() {
             delay(500);
             ESP.restart(); 
         }
+        // COMANDO WIFI
+        else if (cmd == "WIFI") {
+            if (WiFi.getMode() != WIFI_OFF) {
+                Serial.println("\n[KERNEL] Comando recibido: Apagando antena WiFi (Modo Offline).");
+                WiFi.disconnect(true);
+                WiFi.mode(WIFI_OFF);
+            } else {
+                Serial.println("\n[KERNEL] Comando recibido: El WiFi ya estaba apagado.");
+            }
+        }
         else if (cmd == "INFO" || cmd == "HEAP" || cmd == "RAM") {
             uint32_t totalSDSize = SD_MMC.totalBytes() / (1024 * 1024);
             uint32_t usedSDSize = SD_MMC.usedBytes() / (1024 * 1024);
@@ -454,40 +613,9 @@ void loop() {
             Serial.printf("  SD Card Usada:      %7u MB\n", usedSDSize);
             Serial.println("==================================================");
         }
-        else if (cmd == "WIFI") {
-            Serial.println("\n[KERNEL] Iniciando Portal Cautivo Manual. Desalojando RAM...");
-            currentState = STATE_PORTAL;
+        else if (cmd == "RESET") {
             if (game) {
-                delete game;
-                game = nullptr;
-            }
-            SceneManager::getInstance().changeScene(nullptr);
-            AssetManager::getInstance().clearUnused();
-            dibujarPantallaPortal();
-            
-            TamaNetworkManager::Config netCfg = {
-                .gfx = gfx,
-                .png = &png,
-                .qrPath = "/QR Network.png",
-                .apSSID = "TamaConfig",
-                .apPassword = "iluvUiluvU<3",
-                .pngOpen = pngOpen,
-                .pngClose = pngClose,
-                .pngRead = pngRead,
-                .pngSeek = pngSeek,
-                .pngDraw = qrDrawCallback,
-                .checkExit = checkExitCallback
-            };
-            TamaNetworkManager netManager(netCfg);
-            netManager.begin();
-            bool completado = netManager.runCaptivePortal();
-
-            if (!completado) {
-                currentState = STATE_GAMEPLAY;
-                game = new Game(172, 320);
-                game->init();
-            } else {
-                ESP.restart();
+                game->resetGame();
             }
         }
     }

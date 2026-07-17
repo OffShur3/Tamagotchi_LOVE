@@ -163,3 +163,25 @@ void AssetManager::clearUnused() {
         }
     }
 }
+// src/assets/AssetManager.cpp (Agregar al final del archivo)
+bool AssetManager::loadPNGDirectToBuffer(const std::string& path, uint16_t* destBuffer) {
+    if (!fileSystem || !png || !destBuffer) return false;
+
+    pngFile = fileSystem->open(path.c_str(), "r");
+    if (!pngFile || pngFile.isDirectory()) return false;
+
+    int rc = png->open(path.c_str(), PNGOpenCallback, PNGCloseCallback, PNGReadCallback, PNGSeekCallback, PNGDrawCallback);
+    if (rc != PNG_SUCCESS) {
+        pngFile.close();
+        return false;
+    }
+
+    // Inyectamos la dirección de la pantalla directamente. Cero bytes extra de RAM.
+    PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png };
+    rc = png->decode(&ctx, 0);
+    
+    png->close();
+    pngFile.close();
+
+    return rc == PNG_SUCCESS;
+}

@@ -4,7 +4,6 @@
 #include <WiFiMulti.h>
 #include <WebServer.h>
 #include <DNSServer.h>
-#include <Preferences.h>
 #include <Arduino_GFX_Library.h>
 #include <PNGdec.h>
 
@@ -14,25 +13,29 @@ public:
         Arduino_GFX* gfx;
         PNG* png;
         const char* qrPath;             // "/QR Network.png"
-        const char* apSSID;             // "TAMA-WiFi-Config"
+        const char* jsonPath;           // "/tama/config/wifi.json" (Sincronizado)
+        const char* apSSID;             // "TamaConfig"
         const char* apPassword;         // Clave AP
         void* (*pngOpen)(const char*, int32_t*);
         void (*pngClose)(void*);
         int32_t (*pngRead)(PNGFILE*, uint8_t*, int32_t);
         int32_t (*pngSeek)(PNGFILE*, int32_t);
         int (*pngDraw)(PNGDRAW*);
-        bool (*checkExit)();            // Callback inyectado para verificar Swipe Left de salida
+        bool (*checkExit)();            // Callback de Swipe Right
     };
 
     TamaNetworkManager(const Config& config);
     ~TamaNetworkManager();
 
-    void begin();
+    // Carga de redes del archivo JSON de la SD
+    bool begin(); 
+    void runBackgroundConnect();
     bool isConnected();
-    void connectSavedNetworks();
     
+    // Control del Portal Cautivo
     bool runCaptivePortal();
-    void clearSavedNetworks();
+    void drawPortalScreen();
+    void handleSave();
 
 private:
     Config _cfg;
@@ -43,7 +46,6 @@ private:
 
     void setupAP();
     void handleRoot();
-    void handleSave();
     void handleNotFound();
     bool drawQRCode();
 };

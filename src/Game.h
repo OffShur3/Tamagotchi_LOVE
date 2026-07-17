@@ -1,5 +1,5 @@
 // src/Game.h
-#pragma once // <-- BLINDAJE CONTRA REDEFINICIONES
+#pragma once 
 #include "render/Renderer.h"
 #include <Arduino_GFX_Library.h>
 #include <stdint.h>
@@ -14,6 +14,11 @@ public:
 
     // Dibuja el frame buffer en el driver de pantalla real
     void flush(Arduino_GFX* display);
+
+    // --- MÉTODOS DE CICLO DE VIDA GENÉRICOS (Bypass de Tamagotchi.h) ---
+    void saveGame();
+    void resetGame();
+    void redraw();
 
 private:
     Renderer renderer;

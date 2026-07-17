@@ -2,7 +2,7 @@
 #include "TamaNetworkManager.h"
 #include <vector>
 #include <algorithm> // Requerido para std::swap
-#include <ArduinoJson.h> // SOLUCIÓN: Parser JSON integrado para la SD
+#include <ArduinoJson.h> 
 #include <SD_MMC.h>
 
 TamaNetworkManager::TamaNetworkManager(const Config& config) 
@@ -13,16 +13,46 @@ TamaNetworkManager::~TamaNetworkManager() {
     _dnsServer.stop();
 }
 
-void TamaNetworkManager::begin() {
-    // Preferences se omite por completo para mitigar fallos físicos de NVS
-    _hasConfiguredNetwork = SD_MMC.exists("/tama/config/wifi.json");
+bool TamaNetworkManager::begin() {
+    if (!_cfg.jsonPath || !SD_MMC.exists(_cfg.jsonPath)) {
+        Serial.println("[PORTAL] No se detecto archivo de red wifi.json en la SD.");
+        return false;
+    }
+
+    File file = SD_MMC.open(_cfg.jsonPath, "r");
+    if (!file) return false;
+
+    StaticJsonDocument<1536> doc;
+    DeserializationError error = deserializeJson(doc, file);
+    file.close();
+
+    if (error) {
+        Serial.println("[PORTAL] Error de decodificacion en wifi.json.");
+        return false;
+    }
+
+    JsonArray arr = doc.as<JsonArray>();
+    int redesRegistradas = 0;
+    
+    for (JsonObject obj : arr) {
+        const char* ssid = obj["ssid"];
+        const char* pass = obj["pass"];
+        if (ssid && strlen(ssid) > 0) {
+            _wifiMulti.addAP(ssid, pass);
+            Serial.printf("[PORTAL] Red registrada en Multi-WiFi: %s\n", ssid);
+            redesRegistradas++;
+        }
+    }
+    
+    _hasConfiguredNetwork = (redesRegistradas > 0);
+    return _hasConfiguredNetwork;
 }
 
 bool TamaNetworkManager::isConnected() {
     return WiFi.status() == WL_CONNECTED;
 }
 
-void TamaNetworkManager::connectSavedNetworks() {
+void TamaNetworkManager::runBackgroundConnect() {
     WiFi.mode(WIFI_STA);
     if (_hasConfiguredNetwork) {
         _wifiMulti.run();
@@ -51,11 +81,11 @@ bool TamaNetworkManager::runCaptivePortal() {
             exitPortal = true;
         }
 
+        // Telemetría Serial interactiva durante el portal cautivo
         if (Serial.available()) {
             String cmd = Serial.readStringUntil('\n');
             cmd.trim();
             cmd.toUpperCase();
-
             if (cmd == "INFO" || cmd == "HEAP" || cmd == "RAM") {
                 Serial.println("\n==================================================");
                 Serial.println("     TAMA KERNEL PORTAL DIAGNOSTICS (ALIVE)       ");
@@ -94,14 +124,50 @@ void TamaNetworkManager::setupAP() {
     delay(100);
 }
 
-// Generador dinámico del portal cautivo ordenando redes por potencia de señal (RSSI)
+void TamaNetworkManager::drawPortalScreen() {
+    _cfg.gfx->fillScreen(0x1042); // MAT_BG
+
+    if (!drawQRCode()) {
+        _cfg.gfx->setTextColor(0xF800); // Rojo
+        _cfg.gfx->setTextSize(1);
+        _cfg.gfx->setCursor(30, 100);
+        _cfg.gfx->print("QR no encontrado");
+    }
+
+    _cfg.gfx->setTextSize(1);
+    _cfg.gfx->setTextColor(0xFEE0); // Amarillo
+    _cfg.gfx->setCursor((172 - (21 * 6)) / 2, 135);
+    _cfg.gfx->print("Conecta tu celular a:");
+
+    _cfg.gfx->setTextSize(2);
+    _cfg.gfx->setTextColor(0xFFFF); // Blanco
+    _cfg.gfx->setCursor((172 - (10 * 12)) / 2, 150);
+    _cfg.gfx->print(_cfg.apSSID);
+    
+    _cfg.gfx->setTextSize(1);
+    _cfg.gfx->setTextColor(0x07E0); // Verde
+    _cfg.gfx->setCursor((172 - (15 * 6)) / 2, 185);
+    _cfg.gfx->print("Admite conexion");
+    _cfg.gfx->setCursor((172 - (12 * 6)) / 2, 200);
+    _cfg.gfx->print("sin Internet");
+    
+    _cfg.gfx->setTextColor(0xFFFF); // Blanco
+    _cfg.gfx->setCursor((172 - (18 * 6)) / 2, 230);
+    _cfg.gfx->print("Entra al navegador");
+    _cfg.gfx->setCursor((172 - (15 * 6)) / 2, 245);
+    _cfg.gfx->print("y elige tu WiFi");
+    
+    _cfg.gfx->setTextSize(2);
+    _cfg.gfx->setCursor((172 - (2 * 12)) / 2, 270);
+    _cfg.gfx->print("<3");
+}
+
 void TamaNetworkManager::handleRoot() {
     int n = WiFi.scanNetworks();
     
     std::vector<int> indices(n);
     for (int i = 0; i < n; i++) indices[i] = i;
 
-    // Ordenamiento de burbuja de mayor a menor potencia de señal (dBm)
     for (int i = 0; i < n - 1; i++) {
         for (int j = i + 1; j < n; j++) {
             if (WiFi.RSSI(indices[j]) > WiFi.RSSI(indices[i])) {
@@ -110,7 +176,6 @@ void TamaNetworkManager::handleRoot() {
         }
     }
 
-    // Construcción del HTML dinámico
     String html = "<!DOCTYPE html><html><head>";
     html += "<meta name='viewport' content='width=device-width, initial-scale=1.0'>";
     html += "<title>TAMA WiFi Config</title>";
@@ -148,7 +213,6 @@ void TamaNetworkManager::handleRoot() {
     _server.send(200, "text/html; charset=utf-8", html);
 }
 
-// LÓGICA DE ALMACENAMIENTO DE MÚLTIPLES REDES EN SD CON CONTROL DE DUPLICADOS
 void TamaNetworkManager::handleSave() {
     String reqSSID = _server.arg("ssid");
     String reqPASS = _server.arg("pass");
@@ -159,8 +223,7 @@ void TamaNetworkManager::handleSave() {
     if (reqSSID.length() > 0) {
         StaticJsonDocument<2048> doc;
         
-        // 1. Intentar cargar el archivo JSON existente de la tarjeta SD
-        File readFile = SD_MMC.open("/tama/config/wifi.json", "r");
+        File readFile = SD_MMC.open(_cfg.jsonPath, "r");
         if (readFile) {
             deserializeJson(doc, readFile);
             readFile.close();
@@ -171,7 +234,6 @@ void TamaNetworkManager::handleSave() {
             arr = doc.to<JsonArray>();
         }
 
-        // 2. Buscar si la red ya existe para actualizar únicamente la contraseña
         bool redExiste = false;
         for (JsonObject obj : arr) {
             const char* ssid = obj["ssid"];
@@ -183,7 +245,6 @@ void TamaNetworkManager::handleSave() {
             }
         }
 
-        // 3. Si es una red nueva, la añadimos al final de la lista
         if (!redExiste) {
             JsonObject newNet = arr.createNestedObject();
             newNet["ssid"] = reqSSID;
@@ -191,11 +252,9 @@ void TamaNetworkManager::handleSave() {
             Serial.println("[PORTAL] Nueva red agregada a la lista de la SD.");
         }
 
-        // Asegurar que el directorio padre existe en la SD
         SD_MMC.mkdir("/tama/config");
 
-        // 4. Guardar los datos actualizados de vuelta a la tarjeta SD
-        File writeFile = SD_MMC.open("/tama/config/wifi.json", "w");
+        File writeFile = SD_MMC.open(_cfg.jsonPath, "w");
         if (writeFile) {
             serializeJson(doc, writeFile);
             writeFile.close();
@@ -213,10 +272,4 @@ void TamaNetworkManager::handleSave() {
 void TamaNetworkManager::handleNotFound() {
     _server.sendHeader("Location", String("http://") + WiFi.softAPIP().toString(), true);
     _server.send(302, "text/plain", "");
-}
-
-void TamaNetworkManager::clearSavedNetworks() {
-    if (SD_MMC.exists("/tama/config/wifi.json")) {
-        SD_MMC.remove("/tama/config/wifi.json");
-    }
 }

@@ -34,6 +34,7 @@
 #define RETRO_WHITE 0xFFFF // BGR_WHITE
 
 enum KernelState {
+    STATE_SCANNING,
     STATE_CONNECTING,
     STATE_GAMEPLAY,
     STATE_POPUP,
@@ -324,8 +325,24 @@ void setup() {
 
     esperarSD();
 
+    // --- BANNER DE INICIO ---
+    String versionArranque = "v0.0.0";
+    if (SD_MMC.exists("/version.txt")) {
+        File vFile = SD_MMC.open("/version.txt", "r");
+        if (vFile) {
+            versionArranque = vFile.readStringUntil('\n');
+            versionArranque.trim();
+            vFile.close();
+        }
+    }
+    Serial.println("\n-------------------------------");
+    Serial.println("Inicializando...");
+    Serial.printf("TAMA %s\n", versionArranque.c_str());
+    Serial.println("-------------------------------\n");
+    // --------------------------------
+
     Preferences prefs;
-    prefs.begin("tama-kernel", false); 
+    prefs.begin("tama-kernel", false);
     debugMode = prefs.getBool("debug", false);
     prefs.end();
 
@@ -348,17 +365,16 @@ void setup() {
     game->flush(gfx);
 
     // 3. CARGA DE REDES MULTI-WIFI
-    Serial.println("[KERNEL] Iniciando conexion WiFi en background...");
+    Serial.println("[KERNEL] Iniciando escaneo de redes en background...");
     WiFi.mode(WIFI_STA);
     
     bool tieneRedes = cargarRedesSD();
 
     if (tieneRedes) {
-        // Iniciar conexión asíncrona a la primera red (NO BLOQUEA)
-        WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
-        ultimoIntentoWiFi = millis();
+        // Escaneo ASÍNCRONO (el 'true' evita que la animación se congele)
+        WiFi.scanNetworks(true); 
         connectionStartTime = millis();
-        currentState = STATE_CONNECTING;
+        currentState = STATE_SCANNING;
     } else {
         Serial.println("[KERNEL] No se detectaron redes validas. Saltando al Popup.");
         WiFi.mode(WIFI_OFF);
@@ -376,20 +392,72 @@ void loop() {
         irADormir();
     }
 
-    // --- TIME SLICING: SOLO RENDERIZAR SI ESTAMOS EN GAMEPLAY O CONECTANDO ---
-    if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_CONNECTING)) {
+    // --- TIME SLICING: SOLO RENDERIZAR SI ESTAMOS EN GAMEPLAY, SCANNING O CONECTANDO ---
+    if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_SCANNING || currentState == STATE_CONNECTING)) {
         game->tick();
+
+        if (updateAvailable && !updateInProgress && currentState == STATE_GAMEPLAY) {
+            UIManager::drawUpdateBadgeFB(game->getFramebuffer(), 172, 320, 24, 24, 12); 
+        }
+
         game->flush(gfx);
     }
 
     // --- MÁQUINA DE ESTADOS DEL KERNEL ---
     switch (currentState) {
+        case STATE_SCANNING: {
+            int n = WiFi.scanComplete();
+            if (n >= 0) {
+                // Escaneo terminado en segundo plano
+                std::vector<std::pair<String, String>> redesDisponibles;
+                
+                for (int i = 0; i < n; ++i) {
+                    String ssid = WiFi.SSID(i);
+                    for (const auto& red : redesGuardadas) {
+                        if (red.first == ssid) {
+                            redesDisponibles.push_back(red);
+                            break; // Encontramos coincidencia
+                        }
+                    }
+                }
+                WiFi.scanDelete(); // Liberar RAM del escaneo
+
+                if (!redesDisponibles.empty()) {
+                    redesGuardadas = redesDisponibles; // Nos quedamos SOLO con las que existen físicamente cerca
+                    Serial.printf("[KERNEL] Red al alcance: %s. Conectando...\n", redesGuardadas[0].first.c_str());
+                    WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
+                    ultimoIntentoWiFi = millis();
+                    intentoRedActual = 0;
+                    currentState = STATE_CONNECTING;
+                } else {
+                    Serial.println("[KERNEL] Ninguna red guardada está al alcance. Pasando a Offline.");
+                    WiFi.mode(WIFI_OFF);
+                    currentState = STATE_POPUP;
+                    UIManager::drawStardewPopup(gfx);
+                    popupLaunchTime = millis();
+                }
+            } else if (n == WIFI_SCAN_FAILED) {
+                Serial.println("[KERNEL] Falló el escaneo. Reintentando...");
+                WiFi.scanNetworks(true);
+            }
+
+            // Timeout de seguridad
+            if (millis() - connectionStartTime > 15000) {
+                Serial.println("[KERNEL] Timeout de escaneo excedido. Lanzando Popup.");
+                WiFi.mode(WIFI_OFF);
+                currentState = STATE_POPUP;
+                UIManager::drawStardewPopup(gfx);
+                popupLaunchTime = millis();
+            }
+            break;
+        }
+
         case STATE_CONNECTING: {
             if (WiFi.status() == WL_CONNECTED) {
                 Serial.println("[KERNEL] WiFi conectado con exito.");
                 currentState = STATE_GAMEPLAY;
             } else {
-                // Si pasaron 5 segundos y no conectó, intentar con la siguiente red de la lista
+                // Si pasaron 5 segundos y no conectó, intentar con la siguiente red de la lista FILTRADA
                 if (millis() - ultimoIntentoWiFi > 5000) {
                     intentoRedActual++;
                     if (intentoRedActual < redesGuardadas.size()) {
@@ -404,7 +472,7 @@ void loop() {
                 }
             }
 
-            if (millis() - connectionStartTime > 15000) {
+            if (millis() - connectionStartTime > 20000) { // 20s total (escaneo + conexion)
                 Serial.println("[KERNEL] Timeout de WiFi excedido. Lanzando Popup interactivo.");
                 WiFi.mode(WIFI_OFF);
                 currentState = STATE_POPUP;
@@ -413,9 +481,7 @@ void loop() {
             }
             break;
         }
-
         case STATE_GAMEPLAY: {
-            // --- ACTUALIZACIÓN OBLIGATORIA AL INICIO ---
             static bool mandatoryUpdateDone = false;
             if (!mandatoryUpdateDone && WiFi.status() == WL_CONNECTED) {
                 mandatoryUpdateDone = true;
@@ -425,45 +491,45 @@ void loop() {
                     .githubUser = "OffShur3",
                     .githubRepo = "Tamagotchi_LOVE",
                     .currentVersionPath = "/version.txt",
-                    .checkIntervalMs = 300000
+                    .checkIntervalMs = 300000 
                 };
                 UpdateManager updateManager(updateCfg);
-                updateManager.checkForUpdate();
 
-                if (updateManager.needMandatoryUpdate()) {
-                    Serial.println("[MAIN] Actualización obligatoria requerida");
-                    updateAvailable = true;
-                    mandatoryUpdate = true;
-                }
-            }
-
-            // Comprobación periódica automática de actualizaciones cada 5 min (300000 ms)
-            static unsigned long lastUpdateCheck = 0;
-            if (WiFi.status() == WL_CONNECTED && !updateInProgress && !updateAvailable &&
-                (millis() - lastUpdateCheck > 300000)) {
-                Serial.println("[MAIN] Verificando actualizaciones...");
-                lastUpdateCheck = millis();
-
-                UpdateManager::Config updateCfg = {
-                    .gfx = gfx,
-                    .githubUser = "OffShur3",
-                    .githubRepo = "Tamagotchi_LOVE",
-                    .currentVersionPath = "/version.txt",
-                    .checkIntervalMs = 300000
-                };
-                UpdateManager updateManager(updateCfg);
+                Serial.println("[MAIN] Ecosistema Wifi Online. Testeando Estado y Servidor OTA Seguro.");
+                
+                // Hace uso 100% resistente 
                 if (updateManager.checkForUpdate()) {
-                    Serial.println("[MAIN] Nueva version disponible!");
                     updateAvailable = true;
                     latestVersion = updateManager.getLatestVersion();
+                    
+                    if (updateManager.needMandatoryUpdate()) {
+                        Serial.println("[MAIN] Peticion Update Mandatorio Confirmado vía Web - Interfaz Abierta...");
+                        mandatoryUpdate = true;
+                    } 
+                } 
+                else if (updateManager.getLatestVersion() == updateManager.getCurrentVersion() 
+                         && updateManager.getCurrentVersion() != "v0.0.0") 
+                {
+                     // ----- ÚNICO CONDICIONAL VALIDO Y DEMOSTRADO PARA "OFFLINE O DESACTVIO RADAR WI FI"
+                    Serial.println("[MAIN] Confirmación NUBE V. Identica. Sistema Inicia Fase Offline, Extinguiendo Radar");
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
+                } 
+                else 
+                {
+                     // Fue interrumpido su test. Que vuelva intentar tras rato largo porque dió cortes local red!
+                    Serial.println("[MAIN] Ocurrio desvanecimiento Peticiones.. Postergando chequeos.");
+                    WiFi.disconnect(true);
+                    WiFi.mode(WIFI_OFF);
                 }
             }
 
+            // Ya evitamos llamar chequeos fantasma que tiran delay el bucle periodico. Al matar wifi esto libera para juegos fluidos todo!. 
+
             if (updateAvailable && !updateInProgress) {
-                UIManager::drawUpdateBadge(gfx, 16, 16, 8); 
-                
+                // UI Mantiene
                 uint16_t tx, ty;
-                if (leerTouch(tx, ty) && UIManager::isTouchingBadge(tx, ty, 16, 16, 14)) {
+                if (leerTouch(tx, ty) && UIManager::isTouchingBadge(tx, ty, 24, 24, 20)) {
                     while (leerTouch(tx, ty)) { delay(10); } 
                     
                     currentState = STATE_POPUP_UPDATE;
@@ -477,34 +543,33 @@ void loop() {
         case STATE_POPUP_UPDATE: {
             int click = leerClickPopupUpdate();
             if (click == 1) { 
-                Serial.println("[MAIN] Iniciando actualizacion completa. Desalojando RAM...");
-                
-                if (game) {
-                    delete game;
-                    game = nullptr;
-                }
+                Serial.println("[MAIN] Decodificadora aceptada Actualización completa vía OTA...");
+                if (game) { delete game; game = nullptr; }
                 SceneManager::getInstance().changeScene(nullptr);
                 AssetManager::getInstance().clearUnused();
 
                 UpdateManager::Config updateCfg = {
-                    .gfx = gfx,
-                    .githubUser = "OffShur3",
-                    .githubRepo = "Tamagotchi_LOVE",
-                    .currentVersionPath = "/version.txt",
-                    .checkIntervalMs = 300000
+                    .gfx = gfx, .githubUser = "OffShur3", .githubRepo = "Tamagotchi_LOVE",
+                    .currentVersionPath = "/version.txt", .checkIntervalMs = 300000
                 };
-                UpdateManager updateManager(updateCfg);
-                updateManager.performFullUpdate(); 
+                
+                // MODO ANTI-DESBORDAMIENTO: Alojamos todo dinámicamente en el Heap!
+                UpdateManager* updateManager = new UpdateManager(updateCfg);
+                updateManager->setLatestVersion(latestVersion);
+                updateManager->performFullUpdate(); 
+                
+                delete updateManager; // Limpiar al terminar
             }
             else if (click == 2) { 
-                Serial.println("[MAIN] Actualización pospuesta.");
+                Serial.println("[MAIN] Usuario postergo o se asusto sobre bajar nuevo OS.");
                 updateAvailable = false;
-                currentState = STATE_GAMEPLAY;
                 
-                // CORRECCIÓN DEFINITIVA: Llamamos al método virtual de la clase base sin casts
-                if (game) {
-                    game->redraw();
-                }
+                Serial.println("[MAIN] ---> Apagando Modulo Antena tras Posponer Viaje Update, Limpiando cache interno Wlan de RAM.  <--- ");
+                WiFi.disconnect(true);
+                WiFi.mode(WIFI_OFF);
+                
+                currentState = STATE_GAMEPLAY;
+                if (game) { game->redraw(); }
             }
             break;
         }

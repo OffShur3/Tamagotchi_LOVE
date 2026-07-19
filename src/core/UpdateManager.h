@@ -8,6 +8,7 @@
 #include <Update.h>
 #include <SD_MMC.h>
 #include <Arduino_GFX_Library.h>
+#include <memory> 
 
 class UpdateManager {
 public:
@@ -25,6 +26,10 @@ public:
     bool needMandatoryUpdate();
     String getCurrentVersion();
     String getLatestVersion() const { return _latestVersion; }
+    
+    // --- ESTA ES LA FUNCIÓN QUE FALTABA DECLARAR ---
+    void setLatestVersion(const String& version) { _latestVersion = version; } 
+    
     bool isUpdateAvailable() const { return _updateAvailable; }
 
     bool performFullUpdate(); 
@@ -35,7 +40,7 @@ private:
     Config _cfg;
     String _latestVersion;
     bool _updateAvailable;
-    String _lastTitle; // Control anti-parpadeo para la interfaz
+    String _lastTitle;
 
     String getAssetUrl(const char* assetName);
     void drawMessage(const String& msg);

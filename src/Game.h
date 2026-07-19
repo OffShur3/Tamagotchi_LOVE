@@ -19,6 +19,7 @@ public:
     void saveGame();
     void resetGame();
     void redraw();
+    uint16_t* getFramebuffer() { return renderer.getFramebuffer(); }
 
 private:
     Renderer renderer;

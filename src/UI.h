@@ -20,6 +20,7 @@ public:
 
     // Badge rojo de notificación táctil
     static void drawUpdateBadge(Arduino_GFX* gfx, int x, int y, int radius);
+    static void drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x0, int y0, int radius);
     static bool isTouchingBadge(uint16_t touchX, uint16_t touchY, int badgeX, int badgeY, int radius);
 };
 

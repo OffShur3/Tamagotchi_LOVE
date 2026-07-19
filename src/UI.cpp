@@ -80,6 +80,50 @@ void UIManager::drawUpdateBadge(Arduino_GFX* gfx, int x, int y, int radius) {
     gfx->print("!");
 }
 
+void UIManager::drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x0, int y0, int radius) {
+    if (!fb) return;
+    
+    uint16_t colorBg = 0xF800; // Rojo Fuerte
+    uint16_t colorFg = 0xFFFF; // Blanco
+    
+    // 1. Dibujar el círculo relleno (Algoritmo rápido de Fuerza Bruta en RAM)
+    for (int y = -radius; y <= radius; y++) {
+        for (int x = -radius; x <= radius; x++) {
+            if (x * x + y * y <= radius * radius) {
+                int px = x0 + x;
+                int py = y0 + y;
+                // Prevenir desbordamientos fuera de la pantalla
+                if (px >= 0 && px < fbWidth && py >= 0 && py < fbHeight) {
+                    fb[py * fbWidth + px] = colorBg;
+                }
+            }
+        }
+    }
+
+    // 2. Dibujar el signo de exclamación "!" en el centro (Bigger & Bolder)
+    // Palito superior (grueso)
+    for (int dy = -5; dy <= 2; dy++) {
+        for (int dx = -1; dx <= 0; dx++) {
+            int px = x0 + dx;
+            int py = y0 + dy;
+            if (px >= 0 && px < fbWidth && py >= 0 && py < fbHeight) {
+                fb[py * fbWidth + px] = colorFg;
+            }
+        }
+    }
+    
+    // Puntito inferior
+    for (int dy = 4; dy <= 5; dy++) {
+        for (int dx = -1; dx <= 0; dx++) {
+            int px = x0 + dx;
+            int py = y0 + dy;
+            if (px >= 0 && px < fbWidth && py >= 0 && py < fbHeight) {
+                fb[py * fbWidth + px] = colorFg;
+            }
+        }
+    }
+}
+
 bool UIManager::isTouchingBadge(uint16_t touchX, uint16_t touchY, int badgeX, int badgeY, int radius) {
     int dx = (int)touchX - badgeX;
     int dy = (int)touchY - badgeY;

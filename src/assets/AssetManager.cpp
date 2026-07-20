@@ -7,7 +7,7 @@ struct PNGUserContext {
     uint16_t* dest_pixels;
     uint8_t* dest_alpha;
     uint16_t width;
-    PNG* png; // Permite al callback invocar métodos de conversión interna de la librería
+    PNG* png; 
 };
 
 int PNGDrawCallback(PNGDRAW *pDraw) {
@@ -15,7 +15,6 @@ int PNGDrawCallback(PNGDRAW *pDraw) {
     uint16_t* dest_row = ctx->dest_pixels + (pDraw->y * ctx->width);
     uint8_t* dest_alpha_row = ctx->dest_alpha + (pDraw->y * ctx->width);
 
-    // Si la imagen es un PNG con canal Alfa nativo de 32 bits (RGBA)
     if (pDraw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA) {
         uint8_t* src = (uint8_t*)pDraw->pPixels;
         for (int x = 0; x < pDraw->iWidth; ++x) {
@@ -31,10 +30,7 @@ int PNGDrawCallback(PNGDRAW *pDraw) {
             }
         }
     } else {
-        // Decodificación de colores segura para indexados, escala de grises y RGB plano sin alfa
         ctx->png->getLineAsRGB565(pDraw, dest_row, PNG_RGB565_LITTLE_ENDIAN, 0);
-
-        // Si la imagen no tiene canal alfa nativo, la marcamos como 100% opaca por defecto
         if (ctx->dest_alpha) {
             memset(dest_alpha_row, 255, pDraw->iWidth);
         }
@@ -51,9 +47,7 @@ void* PNGOpenCallback(const char *filename, int32_t *size) {
     return &pngFile;
 }
 
-void PNGCloseCallback(void *handle) {
-    // Se cierra de manera explícita en loadFromFile
-}
+void PNGCloseCallback(void *handle) {}
 
 int32_t PNGReadCallback(PNGFILE *handle, uint8_t *buffer, int32_t length) {
     fs::File* f = (fs::File*)handle->fHandle;
@@ -102,44 +96,38 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
     size_t colorBytes = (size_t)tex->width * tex->height * sizeof(uint16_t);
     size_t alphaBytes = hasAlpha ? (size_t)tex->width * tex->height : 0;
 
-    // --- TELEMETRÍA DE SEGURIDAD EN ARRANQUE POR PUERTO SERIAL ---
     Serial.println("\n--------------------------------------------------");
     Serial.printf("[ASSETS] Abriendo archivo: %s\n", path.c_str());
     Serial.printf("[ASSETS] Dimensiones:      %dx%d píxeles\n", tex->width, tex->height);
     Serial.printf("[ASSETS] Memoria requerida: %u Bytes (%u KB)\n", 
                   (unsigned)(colorBytes + alphaBytes), (unsigned)((colorBytes + alphaBytes) / 1024));
-    Serial.printf("[ASSETS] Bloque contiguo más grande en Heap: %u Bytes (%u KB)\n", 
-                  heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024);
+    Serial.printf("[ASSETS] Free PSRAM (User Space): %u Bytes (%u KB)\n", 
+                  ESP.getFreePsram(), ESP.getFreePsram() / 1024);
     Serial.println("--------------------------------------------------");
 
-    // Intentar alojar buffers en PSRAM; fallback automático a RAM interna
+    // ASIGNACIÓN ESTRICTA A PSRAM. Si falla, NO usamos la SRAM (Kernel Space).
     tex->pixels = (uint16_t*)heap_caps_malloc(colorBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    if (!tex->pixels) {
-        tex->pixels = (uint16_t*)malloc(colorBytes);
-    }
-
+    
     if (hasAlpha) {
         tex->alpha = (uint8_t*)heap_caps_malloc(alphaBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-        if (!tex->alpha) {
-            tex->alpha = (uint8_t*)malloc(alphaBytes);
-        }
     } else {
         tex->alpha = nullptr;
     }
 
     if (!tex->pixels || (hasAlpha && !tex->alpha)) {
-        Serial.printf("[ASSETS] ERROR: Memoria insuficiente para alojar %s en SRAM.\n", path.c_str());
+        Serial.printf("[ASSETS] ERROR CRÍTICO: No hay suficiente PSRAM libre para %s\n", path.c_str());
+        // Liberar lo que se haya alcanzado a pedir para no dejar memory leaks
+        if (tex->pixels) heap_caps_free(tex->pixels);
+        if (tex->alpha) heap_caps_free(tex->alpha);
         png->close();
         pngFile.close();
         return nullptr;
     }
 
-    // Inicializar el alfa a 255 (totalmente opaco)
     if (tex->alpha) {
         memset(tex->alpha, 255, alphaBytes);
     }
 
-    // Inyectamos la referencia del decodificador 'png' al contexto
     PNGUserContext ctx = { tex->pixels, tex->alpha, tex->width, png };
     rc = png->decode(&ctx, 0);
     
@@ -163,7 +151,7 @@ void AssetManager::clearUnused() {
         }
     }
 }
-// src/assets/AssetManager.cpp (Agregar al final del archivo)
+
 bool AssetManager::loadPNGDirectToBuffer(const std::string& path, uint16_t* destBuffer) {
     if (!fileSystem || !png || !destBuffer) return false;
 
@@ -176,7 +164,6 @@ bool AssetManager::loadPNGDirectToBuffer(const std::string& path, uint16_t* dest
         return false;
     }
 
-    // Inyectamos la dirección de la pantalla directamente. Cero bytes extra de RAM.
     PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png };
     rc = png->decode(&ctx, 0);
     

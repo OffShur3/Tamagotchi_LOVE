@@ -197,24 +197,43 @@ void Renderer::render(const std::vector<std::shared_ptr<RenderObject>>& objects)
 
     // --- HUD DE DIAGNÓSTICO EN TIEMPO REAL DIRECTO EN FRAMEBUFFER ---
     if (debugMode) {
-        uint32_t freeHeap = ESP.getFreeHeap();
-        int32_t barW = (freeHeap * width) / (200 * 1024);
-        if (barW > width) barW = width;
-        if (barW < 0) barW = 0;
+        // 1. Obtener estados de memoria
+        uint32_t totalSRAM = ESP.getHeapSize();
+        uint32_t freeSRAM  = ESP.getFreeHeap();
+        uint32_t usedSRAM  = totalSRAM - freeSRAM;
 
-        uint16_t barColor = 0x07E0; // Verde (> 100 KB)
-        if (freeHeap < 50 * 1024) {
-            barColor = 0xF800; // Rojo (< 50 KB)
-        } else if (freeHeap < 100 * 1024) {
-            barColor = 0xFEE0; // Amarillo (< 100 KB)
-        }
+        uint32_t totalPSRAM = ESP.getPsramSize();
+        uint32_t freePSRAM  = ESP.getFreePsram();
+        uint32_t usedPSRAM  = totalPSRAM - freePSRAM;
 
-        for (int16_t y = 0; y < 6; ++y) {
-            for (int16_t x = 0; x < width; ++x) {
-                if (x < barW) {
-                    framebuffer[y * width + x] = barColor;
-                } else {
-                    framebuffer[y * width + x] = 0x3186;
+        uint32_t totalMem = totalSRAM + totalPSRAM;
+
+        if (totalMem > 0) {
+            // 2. Calcular anchos proporcionales en los 172 píxeles de la pantalla
+            int wSRAM = (totalSRAM * width) / totalMem;
+            int wPSRAM = width - wSRAM; // El resto de la pantalla
+
+            // 3. Calcular cuántos píxeles pintar de "usado" en cada sección
+            int pxUsedSRAM = (usedSRAM * wSRAM) / totalSRAM;
+            int pxUsedPSRAM = (totalPSRAM > 0) ? (usedPSRAM * wPSRAM) / totalPSRAM : 0;
+
+            // 4. Paleta de colores Ciberpunk/Técnica
+            uint16_t cSramUsed  = 0xF800; // Rojo (SRAM RAM Ocupada - CRÍTICO)
+            uint16_t cSramFree  = 0x07E0; // Verde (SRAM RAM Libre - OK)
+            uint16_t cPsramUsed = 0x981F; // Púrpura (PSRAM Ocupada)
+            uint16_t cPsramFree = 0x07FF; // Cian / Azul Claro (PSRAM Libre)
+
+            // 5. Dibujar la barra de 6 píxeles de alto en la parte superior
+            for (int16_t y = 0; y < 6; ++y) {
+                for (int16_t x = 0; x < width; ++x) {
+                    if (x < wSRAM) {
+                        // Pintando la porción de memoria interna (SRAM)
+                        framebuffer[y * width + x] = (x < pxUsedSRAM) ? cSramUsed : cSramFree;
+                    } else {
+                        // Pintando la masiva porción de PSRAM externa
+                        int localX = x - wSRAM;
+                        framebuffer[y * width + x] = (localX < pxUsedPSRAM) ? cPsramUsed : cPsramFree;
+                    }
                 }
             }
         }

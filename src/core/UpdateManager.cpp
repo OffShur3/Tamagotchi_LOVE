@@ -28,16 +28,16 @@ bool UpdateManager::needMandatoryUpdate() {
 bool checkDnsSafely(const char* host) {
     IPAddress ip;
     int dnsRetries = 0;
-    while(WiFi.hostByName(host, ip) != 1 && dnsRetries < 20) {
+    while(WiFi.hostByName(host, ip) != 1 && dnsRetries < 15) {
+        Serial.printf("[OTA] DNS: Esperando Nodos para la traduccion de Direccion IP Server.. Intento %d...\n", dnsRetries);
         delay(500);
         dnsRetries++;
     }
-    return dnsRetries < 20;
+    return dnsRetries < 15;
 }
 
 bool UpdateManager::checkForUpdate() {
     if (WiFi.status() != WL_CONNECTED) return false;
-
     if (!checkDnsSafely("api.github.com")) return false;
 
     int retries = 3;
@@ -46,7 +46,9 @@ bool UpdateManager::checkForUpdate() {
         client->setInsecure(); 
 
         HTTPClient http;
-        http.setReuse(false);
+        http.setTimeout(15000); // 15s timeout global (elimina el Bad File Number)
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+
         String url = "https://api.github.com/repos/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/latest";
 
         if (http.begin(*client, url)) {
@@ -62,7 +64,10 @@ bool UpdateManager::checkForUpdate() {
                     int tagEnd = payload.indexOf("\"", tagPos);
                     _latestVersion = payload.substring(tagPos, tagEnd);
                     
-                    if (_latestVersion != getCurrentVersion() && _latestVersion.length() > 0) {
+                    String current = getCurrentVersion();
+                    Serial.printf("[OTA] Firmware Original en Operación: %s | Último Lote de Master Branch Carga TAMA %s\n", current.c_str(), _latestVersion.c_str());
+                    
+                    if (_latestVersion != current && _latestVersion.length() > 0) {
                         _updateAvailable = true;
                         http.end();
                         return true; 
@@ -74,14 +79,14 @@ bool UpdateManager::checkForUpdate() {
             http.end();
         }
         retries--;
-        if (retries > 0) delay(1500); 
+        if (retries > 0) delay(1000); 
     }
     return false;
 }
 
 void UpdateManager::drawMessage(const String& msg) {
     _lastTitle = ""; 
-    _cfg.gfx->fillScreen(0x18C3); // BGR Blue Rustico
+    _cfg.gfx->fillScreen(0x18C3); 
     _cfg.gfx->setTextColor(0xFFFF);
     _cfg.gfx->setTextSize(1);
     int textX = (172 - (msg.length() * 6)) / 2;
@@ -90,9 +95,7 @@ void UpdateManager::drawMessage(const String& msg) {
     _cfg.gfx->print(msg);
 }
 
-// INYECCIÓN DE TU CÓDIGO GRÁFICO CON TEXTO PORCENTUAL:
 void UpdateManager::drawProgress(const String& title, int progress, int total) {
-    // Dibujo general estático una vez:
     if (title != _lastTitle) {
         _cfg.gfx->fillScreen(0x18C3);
         _cfg.gfx->setTextColor(0xFFFF);
@@ -106,25 +109,17 @@ void UpdateManager::drawProgress(const String& title, int progress, int total) {
 
     if (total > 0) {
         int percentage = (progress * 100) / total;
-
-        // Base Blanca de la barra (borde / fill background)
         _cfg.gfx->fillRect(20, 130, 132, 20, 0x1042);
         _cfg.gfx->drawRect(20, 130, 132, 20, 0xFFFF);
-        
-        // Relleno Verde Tierras del Stardew/Retro 
         int fillW = (128 * percentage) / 100;
         if (fillW > 128) fillW = 128;
         _cfg.gfx->fillRect(22, 132, fillW, 16, 0x54A8); 
-
-        // Mostrar el porcentaje exacto (al 142 Y como tu referencia original!)
-        int percentX = (172 - (4 * 6)) / 2; // Para ubicar algo en centro "100%"
+        int percentX = (172 - (4 * 6)) / 2;
         _cfg.gfx->setTextColor(0xFFFF);
         _cfg.gfx->setTextSize(1);
         _cfg.gfx->setCursor(percentX + 2, 160);
         _cfg.gfx->printf("%d%%", percentage);
-
     } else {
-        // En caso que haya animacion desconocida (Content Length: -1)
         _cfg.gfx->drawRect(20, 130, 132, 20, 0xFFFF);
         int fill = (progress % 102400) * 128 / 102400;
         _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8);
@@ -134,18 +129,22 @@ void UpdateManager::drawProgress(const String& title, int progress, int total) {
 
 String UpdateManager::getAssetUrl(const char* assetName) {
     if (_latestVersion.length() == 0 || _latestVersion == "") {
+        Serial.println("[DEBUG-OTA] Limpio Version Caché Internamente C++. Obteniendo Puntero AWS en directo...");
         checkForUpdate(); 
     }
     return "https://github.com/" + String(_cfg.githubUser) + "/" + String(_cfg.githubRepo) + "/releases/download/" + _latestVersion + "/" + String(assetName);
 }
 
 bool UpdateManager::performFullUpdate() {
-    drawMessage("Estableciendo Carga...");
+    Serial.println("\n=============================================");
+    Serial.println("[DEBUG-OTA]      FULL TAMA OS NATIVE MANAGER ");
+    Serial.println("=============================================\n");
+    drawMessage("Conexion AWS Cloud...");
     delay(1000); 
 
     if (_latestVersion.length() == 0 || _latestVersion == "") {
         if (!checkForUpdate()) {
-            drawMessage("Nube inaccesible");
+            drawMessage("Sin Contacto");
             delay(3000);
             ESP.restart();
             return false;
@@ -153,225 +152,215 @@ bool UpdateManager::performFullUpdate() {
     }
 
     if (!performSDUpdate()) {
-        drawMessage("Fallo Servidor SD");
+        drawMessage("Server Caido 1 Nv.");
         delay(3000);
         ESP.restart(); 
         return false;
     }
 
-    drawMessage("Cerrando Base OS...");
+    drawMessage("Soporte Completo SD.");
     delay(1000);
 
     if (performFirmwareUpdate()) {
+        Serial.println("\n[DEBUG-OTA] Tarea Explicita Completa al 100%");
         writeVersionFile(_latestVersion);
-        drawMessage("Reiniciando...");
-        delay(2000);
+        drawMessage("Renicio Maquina Vz");
+        Serial.flush();
+        delay(2500);
         ESP.restart();
         return true;
     }
     
-    drawMessage("ROM Corrupta!");
-    delay(3000);
+    drawMessage("ROM Corrompida AWS");
+    delay(4000);
     ESP.restart();
     return false;
 }
 
 bool UpdateManager::performSDUpdate() {
     String url = getAssetUrl("sd_files.tar");
-    drawMessage("Recopilando Entorno...");
-
     if (!checkDnsSafely("github.com")) return false;
 
-    int retries = 0;
-    while (retries < 10) {
+    int retries = 3; 
+    while (retries > 0) {
+        Serial.printf("[DEBUG-OTA] Transferencia F1 Nube Server AWS Invocado [%d Tries]\n", retries);
+        
         std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure);
-        client->setInsecure();
+        client->setInsecure(); 
         
         HTTPClient http;
-        http.setReuse(false);
-        const char* headerKeys[] = {"Location"};
-        http.collectHeaders(headerKeys, 1);
-
-        if (!http.begin(*client, url)) {
-            delay(1000);
-            retries++;
-            continue;
-        }
-
-        int httpCode = http.GET();
-        if (httpCode == 301 || httpCode == 302) {
-            url = http.header("Location");
-            http.end();
-            continue; 
-        }
-
-        if (httpCode == 200) {
-            int total = http.getSize();
-            File file = SD_MMC.open("/update.tar", "w");
-            if (!file) {
-                http.end();
-                return false;
-            }
-
-            WiFiClient* stream = http.getStreamPtr();
-            std::unique_ptr<uint8_t[]> buffer(new uint8_t[4096]); 
-            int written = 0;
-            int len = total;
-            int lastProgress = 0; 
-
-            drawProgress("Bajando Recursos...", 0, total);
-
-            while (http.connected() && (len > 0 || len == -1)) {
-                size_t size = stream->available();
-                if (size) {
-                    size_t toRead = (size > 4096) ? 4096 : size;
-                    if (len > 0 && toRead > len) toRead = len; 
-                    
-                    int c = stream->readBytes(buffer.get(), toRead);
-                    file.write(buffer.get(), c);
-                    written += c;
-                    if (len > 0) len -= c;
-                    
-                    if (written - lastProgress > 25600) {
-                        drawProgress("Bajando Recursos...", written, total);
-                        lastProgress = written;
-                    }
-                } else {
-                    delay(1); // LA MEDICINA REAL AL DESVANECIMIENTO ESP32
-                }
-            }
+        http.setTimeout(15000); // 15s timeout global
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS); 
+        
+        if (http.begin(*client, url)) {
+            int httpCode = http.GET();
             
-            drawProgress("Bajando Recursos...", total, total);
-            file.close();
-            http.end();
+            if (httpCode == 200) {
+                int total = http.getSize();
+                File file = SD_MMC.open("/update.tar", "w");
+                if (!file) {
+                    http.end();
+                    return false;
+                }
 
-            drawProgress("Descomprimiendo SD", 50, 100); 
-            extractTar("/update.tar", "/");
-            SD_MMC.remove("/update.tar");
-            return true;
-        }
+                WiFiClient* stream = http.getStreamPtr();
+                stream->setTimeout(15000); // Tolerancia vital a paquetes fragmentados
+                
+                // Forzamos el buffer temporal de 4KB a PSRAM para proteger el Kernel
+                std::unique_ptr<uint8_t, decltype(&free)> buffer((uint8_t*)heap_caps_malloc(4096, MALLOC_CAP_SPIRAM), &free);
+                
+                int written = 0;
+                int len = total;
+                int lastDraw = 0;
+                bool wasCompleted = false;
 
-        if (httpCode == 404) {
-            drawMessage(String("Cociendo nube.. ") + String(10 - retries));
-            http.end();
-            delay(8000);
-            retries++;
-        } else {
-            drawMessage("Latencia Servidores...");
-            http.end();
-            delay(3000);
-            retries++;
+                drawProgress("Descarga Graficas.", 0, total);
+
+                while (http.connected() && (len == -1 || written < len)) {
+                    size_t available = stream->available();
+                    if (available) {
+                        size_t toRead = (available > 4096) ? 4096 : available;
+                        int c = stream->readBytes(buffer.get(), toRead);
+                        file.write(buffer.get(), c);
+                        written += c;
+                        
+                        if (written - lastDraw >= 85400) { 
+                             drawProgress("Montando Espacio SD.", written, total);
+                             lastDraw = written;
+                             Serial.printf("[DEBUG-OTA] Alquilado: %d KB de su Server Activo!\n", written / 1024);
+                        }
+                    } else {
+                        delay(1); 
+                    }
+                }
+                
+                file.close();
+
+                if (written == total || (total == -1 && written > 0)) {
+                    drawProgress("Trama Estabilizada.", 100, 100);
+                    Serial.println("[DEBUG-OTA] Descargando de File F1 Estricto sin perdidas Completas Ok!");
+                    wasCompleted = true;
+                }
+
+                http.end(); 
+                
+                if (wasCompleted) {
+                    drawProgress("Transicion al Root..", 50, 100);
+                    extractTar("/update.tar", "/");
+                    SD_MMC.remove("/update.tar");
+                    return true;
+                } 
+
+                SD_MMC.remove("/update.tar");
+            } 
+            else if (httpCode == 404) {
+                drawMessage("Amazon Process Png...");
+                http.end();
+                delay(7000); 
+            } else {
+                http.end();
+                delay(2000);
+            }
         }
+        retries--;
     }
     return false;
 }
 
+// EL NÚCLEO NATIVO MÁXIMO E INDESTRUCTIBLE PROTEGIDO CON TIMEOUT
 bool UpdateManager::performFirmwareUpdate() {
     String url = getAssetUrl("firmware.bin");
-    drawMessage("Estabilizando Kernel");
-
     if (!checkDnsSafely("github.com")) return false;
 
-    int retries = 0;
-    while (retries < 10) {
+    int retries = 3;
+    while (retries > 0) {
+        Serial.printf("\n[DEBUG-OTA] Ejecutando ROM Nucleo C++. AWS Interconnect... [%d Tries]\n", retries);
+        
         std::unique_ptr<WiFiClientSecure> client(new WiFiClientSecure);
-        client->setInsecure();
+        client->setInsecure(); 
         
         HTTPClient http;
-        http.setReuse(false);
-        const char* headerKeys[] = {"Location"};
-        http.collectHeaders(headerKeys, 1);
+        http.setTimeout(15000); // 15s timeout global de conexión 
+        http.setFollowRedirects(HTTPC_STRICT_FOLLOW_REDIRECTS);
+        
+        if (http.begin(*client, url)) {
+            int httpCode = http.GET();
+            
+            if (httpCode == 200) {
+                int totalLen = http.getSize();
+                if (totalLen <= 0) totalLen = UPDATE_SIZE_UNKNOWN;
 
-        if (!http.begin(*client, url)) {
-            delay(1000);
-            retries++;
-            continue;
-        }
+                bool canBegin = Update.begin(totalLen, U_FLASH);
+                if (!canBegin) {
+                    Serial.println("[DEBUG-OTA] Modulo Memoria Física OS Tildado. Falla Update API ESP32 begin().");
+                    Update.printError(Serial);
+                    http.end();
+                    return false;
+                }
 
-        int httpCode = http.GET();
-        if (httpCode == 301 || httpCode == 302) {
-            url = http.header("Location");
-            http.end();
-            continue; 
-        }
-
-        if (httpCode == 200) {
-            int contentLength = http.getSize();
-            bool canBegin = (contentLength > 0) ? Update.begin(contentLength, U_FLASH) : Update.begin(UPDATE_SIZE_UNKNOWN, U_FLASH);
-
-            if (!canBegin) {
-                http.end();
-                return false;
-            }
-
-            WiFiClient* stream = http.getStreamPtr();
-            std::unique_ptr<uint8_t[]> buffer(new uint8_t[4096]); 
-            size_t written = 0;
-            int len = contentLength;
-            int lastProgress = 0; 
-
-            drawProgress("Sobreescribiendo...", 0, contentLength);
-
-            while (http.connected() && (len > 0 || len == -1)) {
-                size_t size = stream->available();
-                if (size) {
-                    size_t toRead = (size > 4096) ? 4096 : size;
-                    if (len > 0 && toRead > len) toRead = len;
-                    
-                    int c = stream->readBytes(buffer.get(), toRead);
-                    size_t res = Update.write(buffer.get(), c);
-                    
-                    if (res != c) {
-                        return false; 
+                Update.onProgress([this](size_t progress, size_t total) {
+                    static size_t lastProgress = 0;
+                    if (progress - lastProgress > 95000 || progress == total) { 
+                        int percent = (total > 0) ? (progress * 100) / total : 0;
+                        Serial.printf("[DEBUG-OTA] Extinguiendo vieja base / Grabando ROM Nucleos... [ %d %% ]\n", percent);
+                        this->drawProgress("Insertando FW", progress, total);
+                        lastProgress = progress;
                     }
+                });
+
+                WiFiClient* stream = http.getStreamPtr();
+                stream->setTimeout(15000); // 15s timeout crítico para paquetes de red (Evita el corte de writeStream)
+                
+                Serial.println("[DEBUG-OTA] Instando Flujo OTA Nativo ESP (Blindado contra latencias de Amazon) ...");
+                drawProgress("Descargas al BIOS...", 0, totalLen);
+
+                // Volvemos a la rutina nativa del ESP32 protegida por nuestro setTimeout
+                size_t writtenBytesCoreEsp = Update.writeStream(*stream);
+                
+                Update.onProgress(nullptr); 
+
+                Serial.println("\n[DEBUG-OTA] Flujo nativo WriteStream concluido y clausurado limpiando Modems RAM...");
+                Serial.printf("[DEBUG-OTA] Logrado Finalizar -> Escrito Pila ESP OS : %d / %d AWS Sizes!\n", writtenBytesCoreEsp, totalLen);
+
+                if (writtenBytesCoreEsp > 0 && (totalLen == UPDATE_SIZE_UNKNOWN || writtenBytesCoreEsp == (size_t)totalLen)) {
+                    Serial.println("[DEBUG-OTA] Calculando suma matematica del archivo con Encriptaciones C...");
                     
-                    written += c;
-                    if (len > 0) len -= c;
-                    
-                    if (written - lastProgress > 25600) { 
-                        drawProgress("Sobreescribiendo...", written, contentLength);
-                        lastProgress = written;
+                    if (Update.end(true)) {
+                        Serial.println("[DEBUG-OTA] => Veredicto NUBE ROM MD5... SUPERADO EXTREMO! FIRMWARE REESCRITO ESTRECHAMIENTO VALIDO. <==");
+                        http.end();
+                        return true;
+                    } else {
+                        Serial.print("[DEBUG-OTA] OUCH: VALIDACION EXPRESA EN CHIPSET MURIO MD5 CORROMPID!. RAZÓN FIRM: ");
+                        Update.printError(Serial); 
+                        Serial.println(); 
                     }
                 } else {
-                    delay(1); // LA MEDICINA DE RETRO-ALIMENTACIÓN WATCHDOG
+                    Update.end(false); // EVADE LA ROTURA OS EN ARRANQUE CAIDA POR ERROR AWS TCP
+                    Serial.print("[DEBUG-OTA] Despejo ROM corruptas y pedazos muertos que Cayeron AWS Redes Tapon ! Detalle ESP Nativo Core dice = ");
+                    Update.printError(Serial);
                 }
+
+                http.end();
+            } else if (httpCode == 404) {
+                drawMessage("Amazon Atrasado Nv");
+                http.end();
+                delay(7000); 
+            } else {
+                http.end();
+                delay(2000); 
             }
-            
-            drawProgress("Sobreescribiendo...", contentLength, contentLength);
-
-            if (written == contentLength) {
-                if (Update.end(true)) {
-                    writeVersionFile(_latestVersion);
-                    drawMessage("Kernel Actualizado!");
-                    Serial.flush();
-                    delay(2000);
-                    ESP.restart(); 
-                    return true; // Ya sabemos que no llega ni se evalua de todos modos aquí :)
-                }
-            } 
-            Update.end(false); 
-            http.end();
-            return false;
         }
-
-        if (httpCode == 404) {
-            drawMessage(String("Cociendo Nucleo ") + String(10 - retries));
-            http.end();
-            delay(8000);
-            retries++;
-        } else {
-            drawMessage("Límites Nube T1");
-            http.end();
-            delay(3000);
-            retries++;
-        }
+        retries--;
     }
     return false;
 }
 
 void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
     File tarFile = SD_MMC.open(tarPath, "r");
-    if (!tarFile) return;
+    if (!tarFile) {
+        Serial.println("[TAR] ESP_FAIL. File Imposible Mapearlo y localizar Muestra !");
+        return;
+    }
 
     uint8_t buffer[512];
     int count = 0;
@@ -426,6 +415,7 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
                 }
                 outFile.close();
                 count++;
+                Serial.printf("[DEBUG-OTA] Compilado Estatico Integrado y Abrochado Local -> : %s\n", fullPath.c_str());
             } else {
                 long blocksToSkip = (fileSize + 511) / 512;
                 tarFile.seek(tarFile.position() + blocksToSkip * 512);
@@ -439,6 +429,7 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
         }
     }
     tarFile.close();
+    Serial.printf("\n[DEBUG-OTA] Limpieza De Carpetas Comprimidas Terminó. Despliege Local 100%%: %d Directorios/File\n", count);
 }
 
 void UpdateManager::writeVersionFile(const String& version) {

@@ -5,6 +5,21 @@
 #include <ArduinoJson.h> 
 #include <SD_MMC.h>
 
+// --- Allocador Custom para forzar a ArduinoJson a usar la PSRAM ---
+struct SpiRamAllocator {
+    void* allocate(size_t size) {
+        return heap_caps_malloc(size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+    void deallocate(void* pointer) {
+        heap_caps_free(pointer);
+    }
+    void* reallocate(void* ptr, size_t new_size) {
+        return heap_caps_realloc(ptr, new_size, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+    }
+};
+typedef BasicJsonDocument<SpiRamAllocator> SpiRamJsonDocument;
+// ------------------------------------------------------------------
+
 TamaNetworkManager::TamaNetworkManager(const Config& config) 
     : _cfg(config), _server(80), _hasConfiguredNetwork(false) {}
 
@@ -22,7 +37,8 @@ bool TamaNetworkManager::begin() {
     File file = SD_MMC.open(_cfg.jsonPath, "r");
     if (!file) return false;
 
-    StaticJsonDocument<1536> doc;
+    // Alojamos el JSON en la PSRAM para no tocar el Kernel Space (SRAM)
+    SpiRamJsonDocument doc(4096); 
     DeserializationError error = deserializeJson(doc, file);
     file.close();
 
@@ -92,8 +108,7 @@ bool TamaNetworkManager::runCaptivePortal() {
                 Serial.println("==================================================");
                 Serial.printf("  Free Heap RAM:      %7u Bytes (%u KB)\n", ESP.getFreeHeap(), ESP.getFreeHeap() / 1024);
                 Serial.printf("  Min Free Heap:      %7u Bytes (%u KB)\n", ESP.getMinFreeHeap(), ESP.getMinFreeHeap() / 1024);
-                Serial.printf("  Bloque contiguo Max:%7u Bytes (%u KB)\n", 
-                              heap_caps_get_largest_free_block(MALLOC_CAP_8BIT), heap_caps_get_largest_free_block(MALLOC_CAP_8BIT) / 1024);
+                Serial.printf("  Free PSRAM:         %7u Bytes (%u KB)\n", ESP.getFreePsram(), ESP.getFreePsram() / 1024);
                 Serial.println("==================================================");
             }
         }
@@ -221,7 +236,8 @@ void TamaNetworkManager::handleSave() {
     reqPASS.trim();
 
     if (reqSSID.length() > 0) {
-        StaticJsonDocument<2048> doc;
+        // Usando PSRAM para la manipulación JSON
+        SpiRamJsonDocument doc(4096);
         
         File readFile = SD_MMC.open(_cfg.jsonPath, "r");
         if (readFile) {

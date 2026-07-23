@@ -5,70 +5,111 @@
 PetScene::PetScene(Pet& petRef) : pet(petRef) {}
 
 void PetScene::enter() {
-    // 1. Cargar Widget de Reloj estilo Stardew Valley
+    // 1. Reloj de madera estilo Stardew
     clockWidget = std::make_shared<ClockWidget>();
     addObject(clockWidget);
 
-    // 2. Cargar Botonera Inferior (Icons UI Spritesheet)
+    // 2. Botonera inferior
     auto uiTex = AssetManager::getInstance().getTexture("/tama/ui/icons_ui.png");
     if (uiTex) {
-        // Botón 1: Comida (10, 275)
         btnFood = std::make_shared<Sprite>(uiTex);
-        btnFood->frameSize = {16, 16};
-        btnFood->frameOffset = {16, 0}; // Coordenada Comida
-        btnFood->position = {10, 275};
-        btnFood->scale = {2, 2}; // 32x32 píxeles táctil
+        btnFood->frameSize = {16, 16}; btnFood->frameOffset = {16, 0};
+        btnFood->position = {10, 275}; btnFood->scale = {2, 2};
         btnFood->layer = RenderLayer::UI;
         addObject(btnFood);
 
-        // Botón 2: Medicina (52, 275)
         btnMed = std::make_shared<Sprite>(uiTex);
-        btnMed->frameSize = {16, 16};
-        btnMed->frameOffset = {0, 0}; // Coordenada Botiquín
-        btnMed->position = {52, 275};
-        btnMed->scale = {2, 2};
+        btnMed->frameSize = {16, 16}; btnMed->frameOffset = {0, 0};
+        btnMed->position = {52, 275}; btnMed->scale = {2, 2};
         btnMed->layer = RenderLayer::UI;
         addObject(btnMed);
 
-        // Botón 3: Limpiar (94, 275)
         btnClean = std::make_shared<Sprite>(uiTex);
-        btnClean->frameSize = {16, 16};
-        btnClean->frameOffset = {0, 16}; // Coordenada Escoba
-        btnClean->position = {94, 275};
-        btnClean->scale = {2, 2};
+        btnClean->frameSize = {16, 16}; btnClean->frameOffset = {0, 16};
+        btnClean->position = {94, 275}; btnClean->scale = {2, 2};
         btnClean->layer = RenderLayer::UI;
         addObject(btnClean);
 
-        // Botón 4: Luz (136, 275)
         btnLamp = std::make_shared<Sprite>(uiTex);
-        btnLamp->frameSize = {16, 16};
-        btnLamp->frameOffset = {16, 16}; // Lámpara encendida por defecto
-        btnLamp->position = {136, 275};
-        btnLamp->scale = {2, 2};
+        btnLamp->frameSize = {16, 16}; btnLamp->frameOffset = {16, 16};
+        btnLamp->position = {136, 275}; btnLamp->scale = {2, 2};
         btnLamp->layer = RenderLayer::UI;
         addObject(btnLamp);
     }
 
-    // 2. Cargar Objetos de Entorno (Caca / Alimento)
+    // 3. Caca en el suelo
     auto envTex = AssetManager::getInstance().getTexture("/tama/ui/objects_env.png");
     if (envTex) {
         poopSprite = std::make_shared<Sprite>(envTex);
-        poopSprite->frameSize = {16, 16};
-        poopSprite->frameOffset = {16, 0}; // Coordenada Caca
-        poopSprite->position = {130, 210};
-        poopSprite->scale = {2, 2};
-        poopSprite->visible = false;
-        poopSprite->layer = RenderLayer::World;
+        poopSprite->frameSize = {16, 16}; poopSprite->frameOffset = {16, 0};
+        poopSprite->position = {130, 210}; poopSprite->scale = {2, 2};
+        poopSprite->visible = false; poopSprite->layer = RenderLayer::World;
         addObject(poopSprite);
     }
 
+    lastKnownStage = pet.getStage();
     updateSpriteTexture();
 }
 
 void PetScene::exit() {
     clearObjects();
-    petSprite = nullptr;
+    petSprite = oldPetSprite = hungerIcon = nullptr;
     btnFood = btnMed = btnClean = btnLamp = poopSprite = nullptr;
+    clockWidget = nullptr;
+}
+
+void PetScene::startEvolutionSequence(PetStage oldStage) {
+    isEvolving = true;
+    evolutionTimer = 0.0f;
+    flickerTimer = 0.0f;
+    currentFlickerInterval = 0.4f;
+    showNewStage = false;
+
+    // Congelar el sprite antiguo
+    oldPetSprite = petSprite;
+
+    // Cargar el sprite de la nueva etapa
+    petSprite = nullptr;
+    currentTexturePath = "";
+    updateSpriteTexture();
+
+    if (oldPetSprite && petSprite) {
+        oldPetSprite->visible = true;
+        petSprite->visible = false;
+    }
+
+    Serial.println("[SCENE] ¡Iniciando secuencia de evolución estilo Pokémon GBA!");
+}
+
+void PetScene::processEvolutionSequence(float dt) {
+    evolutionTimer += dt;
+    flickerTimer += dt;
+
+    // Aceleración matemática del parpadeo: baja de 400ms a 30ms en 4 segundos
+    currentFlickerInterval = max(0.03f, 0.4f - (evolutionTimer / 4.0f) * 0.37f);
+
+    if (flickerTimer >= currentFlickerInterval) {
+        flickerTimer = 0.0f;
+        showNewStage = !showNewStage;
+
+        if (oldPetSprite && petSprite) {
+            oldPetSprite->visible = !showNewStage;
+            petSprite->visible = showNewStage;
+        }
+    }
+
+    // Finalización de la secuencia (a los 4 segundos)
+    if (evolutionTimer >= 4.0f) {
+        isEvolving = false;
+        if (oldPetSprite) {
+            removeObject(oldPetSprite);
+            oldPetSprite = nullptr;
+        }
+        if (petSprite) {
+            petSprite->visible = true;
+        }
+        Serial.println("[SCENE] ¡Evolución finalizada con éxito!");
+    }
 }
 
 void PetScene::updateSpriteTexture() {
@@ -98,19 +139,29 @@ void PetScene::updateSpriteTexture() {
 }
 
 void PetScene::update(float dt) {
+    // 1. Detección automática de Evolución
+    if (!isEvolving && pet.getStage() != lastKnownStage) {
+        PetStage oldStage = lastKnownStage;
+        lastKnownStage = pet.getStage();
+        startEvolutionSequence(oldStage);
+    }
+
+    // 2. Si está evolucionando, ejecutar la animación GBA y pausar el resto
+    if (isEvolving) {
+        processEvolutionSequence(dt);
+        return; 
+    }
+
     updateSpriteTexture();
 
-    // Mostrar u ocultar la caca en el suelo
     if (poopSprite) {
         poopSprite->visible = (pet.getPoopCount() > 0);
     }
 
-    // Cambiar ícono de lámpara ON/OFF
     if (btnLamp) {
         btnLamp->frameOffset.x = pet.isLightOn() ? 16 : 32;
     }
 
-    // Animación de la mascota
     if (petSprite && totalFrames > 1) {
         animTimer += dt;
         if (animTimer >= 0.25f) {
@@ -122,7 +173,9 @@ void PetScene::update(float dt) {
 }
 
 void PetScene::onTouch(uint16_t x, uint16_t y) {
-    // Zona de Botonera Inferior (Y >= 260)
+    // Bloquear controles táctiles durante el espectáculo de evolución
+    if (isEvolving) return; 
+
     if (y >= 260) {
         if (x >= 5 && x <= 45) { pet.feed(); }
         else if (x >= 46 && x <= 85) { pet.heal(); }
@@ -131,7 +184,6 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
-    // Tocar a la mascota directamente (Centro)
     if (x >= 20 && x <= 150 && y >= 80 && y <= 240) {
         pet.pet();
     }

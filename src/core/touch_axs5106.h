@@ -8,7 +8,6 @@
 
 static bool touch_init() {
     pinMode(47, OUTPUT);
-    digitalWrite(47, HIGH); delay(5);
     digitalWrite(47, LOW);  delay(20);
     digitalWrite(47, HIGH); delay(100);
 
@@ -17,32 +16,24 @@ static bool touch_init() {
     return true;
 }
 
-static bool touch_is_pressed() {
+// Lectura atómica de 5 bytes (Evita limpiar registros por separado)
+static bool touch_read(uint16_t &x, uint16_t &y) {
     Wire.beginTransmission(AXS5106_ADDR);
-    Wire.write(0x01); // Leer registro de cantidad de dedos
+    Wire.write(0x02);
     if (Wire.endTransmission() != 0) return false;
     
-    Wire.requestFrom((uint8_t)AXS5106_ADDR, (uint8_t)1);
-    if (Wire.available()) {
-        uint8_t fingers = Wire.read();
-        return (fingers > 0 && fingers < 5); // Retorna true si detecta un dedo
+    uint8_t buf[5] = {0};
+    if (Wire.requestFrom((uint8_t)AXS5106_ADDR, (uint8_t)5) == 5) {
+        for (int i = 0; i < 5; i++) buf[i] = Wire.read();
+        if (buf[0] > 0 && buf[0] < 5) {
+            uint16_t raw_x = ((buf[1] & 0x0F) << 8) | buf[2];
+            uint16_t raw_y = ((buf[3] & 0x0F) << 8) | buf[4];
+            x = (raw_x > 172) ? 0 : (172 - raw_x);
+            y = raw_y;
+            return true;
+        }
     }
     return false;
-}
-
-static void touch_get_xy(uint16_t *x, uint16_t *y) {
-    uint8_t buf[4] = {0};
-    Wire.beginTransmission(AXS5106_ADDR);
-    Wire.write(0x02); // Iniciar la lectura de coordenadas desde X High (0x02)
-    Wire.endTransmission();
-    
-    Wire.requestFrom((uint8_t)AXS5106_ADDR, (uint8_t)4);
-    for (int i = 0; i < 4; i++) {
-        if (Wire.available()) buf[i] = Wire.read();
-    }
-    
-    *x = ((buf[0] & 0x0F) << 8) | buf[1];
-    *y = ((buf[2] & 0x0F) << 8) | buf[3];
 }
 
 #endif

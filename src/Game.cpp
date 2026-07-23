@@ -11,7 +11,6 @@ void Game::init() {
     lastFrameTime = millis();
     renderer.clear(0x0000);
 
-    // Carga de Fondo de Pantalla Zero-Copy
     if (renderer.hasBackgroundBuffer()) {
         auto bgTex = AssetManager::getInstance().getTexture("/tama/ui/bg_main.png");
         if (bgTex) {
@@ -28,7 +27,6 @@ void Game::init() {
         }
     }
 
-    // Inicializar Mascota y Cargar Escena de Juego
     pet.init();
     petScene = std::make_shared<PetScene>(pet);
     SceneManager::getInstance().changeScene(petScene);
@@ -36,15 +34,10 @@ void Game::init() {
 
 void Game::handleInput() {
     uint16_t tx = 0, ty = 0;
-    if (touch_is_pressed()) {
-        touch_get_xy(&tx, &ty);
-        
-        // Mapeo directo de la pantalla táctil invertida
-        uint16_t mapX = (tx > 172) ? 0 : (172 - tx);
-        uint16_t mapY = ty;
-
+    // LECTURA TÁCTIL UNIFICADA
+    if (touch_read(tx, ty)) {
         if (petScene) {
-            petScene->onTouch(mapX, mapY);
+            petScene->onTouch(tx, ty);
         }
     }
 }
@@ -54,12 +47,11 @@ void Game::tick() {
     float dt = (currentTime - lastFrameTime) / 1000.0f;
     lastFrameTime = currentTime;
 
+    if (dt > 0.2f) dt = 0.2f; // Protección contra picos de tiempo
+
     handleInput();
 
-    // Actualizar simulación de la mascota
     pet.update(dt);
-
-    // Actualizar gráfico de la escena actual
     SceneManager::getInstance().update(dt);
 
     auto currentScene = SceneManager::getInstance().getCurrentScene();
@@ -73,21 +65,8 @@ void Game::flush(Arduino_GFX* display) {
     display->draw16bitRGBBitmap(0, 0, renderer.getFramebuffer(), renderer.getWidth(), renderer.getHeight());
 }
 
-void Game::saveGame() {
-    pet.save();
-}
-
-void Game::resetGame() {
-    pet.reset();
-}
-
-void Game::redraw() {
-    // Redibujado en loop continuo
-}
-
-void Game::printStats() const {
-    pet.printStats();
-}
-void Game::onTimeSynced() {
-    pet.catchUpTime(); // Notifica a la mascota que recalcule su estado con la hora real
-}
+void Game::saveGame() { pet.save(); }
+void Game::resetGame() { pet.reset(); }
+void Game::redraw() {}
+void Game::printStats() const { pet.printStats(); }
+void Game::onTimeSynced() { pet.catchUpTime(); }

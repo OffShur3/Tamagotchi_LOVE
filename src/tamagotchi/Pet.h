@@ -51,7 +51,7 @@ public:
     float getHealth() const { return health; }
     uint8_t getPoopCount() const { return poopCount; }
     bool isLightOn() const { return lightsOn; }
-    uint32_t getAge() const { return age; }
+    uint32_t getAge() const { return (uint32_t)age; }
 
     String getSpritePath() const;
 
@@ -68,7 +68,7 @@ private:
     uint8_t poopCount = 0;
     bool lightsOn = true;
 
-    uint32_t age = 0;
+    float age = 0.0f;
     uint32_t lastTimestamp = 0;
     
     float actionTimer = 0.0f;

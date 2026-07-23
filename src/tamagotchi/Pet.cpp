@@ -23,9 +23,25 @@ void Pet::catchUpTime() {
     time_t now = time(NULL);
     if (lastTimestamp > 0 && now > lastTimestamp) {
         uint32_t elapsed = (uint32_t)(now - lastTimestamp);
+
+        // PROTECCIÓN CONTRA SALTO DE FECHA NTP (Ej. de Enero a Julio)
+        // Si el salto es mayor a 8 horas (28800s), limitamos el cálculo a 8 horas max.
+        if (elapsed > 28800) { 
+            Serial.printf("[PET] Salto de fecha detectado (%u s). Capando avance a 8 horas max.\n", elapsed);
+            elapsed = 28800; 
+        }
+
         if (elapsed > 2) {
-            Serial.printf("[PET] Se detectaron %u segundos transcurridos. Actualizando simulación...\n", elapsed);
-            update((float)elapsed);
+            Serial.printf("[PET] Procesando %u segundos transcurridos fuera de línea...\n", elapsed);
+            
+            // Simular el tiempo en bloques de 60 segundos para una degradación suave
+            uint32_t remaining = elapsed;
+            while (remaining > 0) {
+                float step = (remaining > 60) ? 60.0f : (float)remaining;
+                update(step);
+                remaining -= (uint32_t)step;
+            }
+            save(); // Guardar resultado final una sola vez
         }
     }
     lastTimestamp = (uint32_t)now;
@@ -58,15 +74,17 @@ void Pet::update(float dt) {
 
     age += dt;
 
-    // 1. AUTO-GUARDADO CADA 30 SEGUNDOS
-    autoSaveTimer += dt;
-    if (autoSaveTimer >= 30.0f) {
-        autoSaveTimer = 0.0f;
-        save();
-        Serial.println("[PET] Auto-guardado de rutina en SD (30s).");
+    // 1. AUTO-GUARDADO CADA 30 SEGUNDOS (Solo si no estamos en catch-up masivo)
+    if (dt < 2.0f) { // Evita spams si dt es grande
+        autoSaveTimer += dt;
+        if (autoSaveTimer >= 30.0f) {
+            autoSaveTimer = 0.0f;
+            save();
+            Serial.println("[PET] Auto-guardado de rutina en SD (30s).");
+        }
     }
 
-    // 2. Temporizador de animaciones activas (Comer/Feliz)
+    // 2. Temporizador de animaciones táctiles
     if (actionTimer > 0.0f) {
         actionTimer -= dt;
         if (actionTimer <= 0.0f && state != PetState::Dead) {
@@ -74,35 +92,29 @@ void Pet::update(float dt) {
         }
     }
 
-    // 3. EVALUAR EVOLUCIÓN PRIMERO (Para que eclosione de inmediato si corresponde)
+    // 3. EVOLUCIÓN
     checkEvolution();
 
-    // 4. DESGASTE DE ESTADÍSTICAS (Aplica para Bebé, Niño, Adulto, Anciano)
+    // 4. DESGASTE DE ESTADÍSTICAS
     if (stage != PetStage::Egg) {
         float stageHungerMult = (stage == PetStage::Baby) ? 1.5f : 1.0f;
         float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.4f : 1.0f;
 
-        // Hambre: Se consume 100% en el 6% de la vida total
         float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.06f)) * stageHungerMult;
         hunger = max(0.0f, hunger - (hungerRate * dt));
 
-        // Felicidad: Se consume 100% en el 10% de la vida total
         float happinessRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.10f));
         happiness = max(0.0f, happiness - (happinessRate * dt));
 
-        // Energía & Sueño
         if (!lightsOn) {
-            // Recupera energía completa en un 2% de la vida total
             float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f));
             energy = min(100.0f, energy + (energyGain * dt));
             state = PetState::Sleeping;
         } else {
-            // Consume energía en un 12% de la vida total
             float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult;
             energy = max(0.0f, energy - (energyRate * dt));
         }
 
-        // Defecación (Ocurre cada ~2.5% de la vida total)
         float poopInterval = TOTAL_LIFESPAN_SECONDS * 0.025f;
         if (hunger > 40.0f && poopCount < 3) {
             poopTimer += dt;
@@ -110,11 +122,9 @@ void Pet::update(float dt) {
                 poopCount++;
                 poopTimer = 0.0f;
                 Serial.printf("[PET] ¡La mascota hizo caca! Total: %d\n", poopCount);
-                save();
             }
         }
 
-        // Degradación de Salud por caca acumulada o hambre/felicidad en cero
         if (poopCount > 0 || hunger <= 0.0f || happiness <= 0.0f) {
             float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1);
             health = max(0.0f, health - (healthDropRate * dt));
@@ -182,8 +192,8 @@ void Pet::feed() {
 
 void Pet::pet() {
     if (stage == PetStage::Egg) { 
-        // Tocar el huevo le suma un 1% de su vida (Acelera la eclosión)
-        age += (TOTAL_LIFESPAN_SECONDS * 0.01f); 
+        // 1 toque acelera el 1% de la vida total
+        age += (TOTAL_LIFESPAN_SECONDS * 0.005f); 
         Serial.println("[PET] ¡Tocaste el huevo! Acelerando eclosión...");
         return; 
     }
@@ -266,7 +276,7 @@ bool Pet::load() {
     health        = doc["health"] | 100.0f;
     poopCount     = doc["poop"] | 0;
     lightsOn      = doc["lights"] | true;
-    age           = doc["age"] | 0;
+    age           = doc["age"] | 0.0f;
     lastTimestamp = doc["lastTimestamp"] | 0;
 
     return true;
@@ -299,7 +309,7 @@ void Pet::reset() {
     stage = PetStage::Egg;
     state = PetState::Idle;
     hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
-    poopCount = 0; lightsOn = true; age = 0; actionTimer = 0.0f; poopTimer = 0.0f;
+    poopCount = 0; lightsOn = true; age = 0.0f; actionTimer = 0.0f; poopTimer = 0.0f;
     lastTimestamp = (uint32_t)time(NULL);
     save();
 }

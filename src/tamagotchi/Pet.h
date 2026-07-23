@@ -6,18 +6,18 @@
 // =========================================================================
 //  CONFIGURACIÓN DEL CICLO DE VIDA DE LA MASCOTA
 // =========================================================================
-// Modifica esta variable para cambiar la duración entera de la vida:
-//   - 300.0f     : Modo Ultra-Rápido (5 minutos totales) para testing de escritorio.
-//   - 86400.0f   : Modo Prueba (1 Día = 24 Horas).
-//   - 2592000.0f : Modo Real (30 Días = 30 * 24 * 3600 segundos).
+// Modifica esta variable para ajustar la escala de tiempo total:
+//   - 300.0f     : Modo Test Express (5 Minutos totales)
+//   - 86400.0f   : Modo Test Diario (1 Día = 24 Horas)
+//   - 2592000.0f : Modo Realismo (1 Mes = 30 Días)
 constexpr float TOTAL_LIFESPAN_SECONDS = 86400.0f; 
 
-// Subdivisión desigual de etapas (La suma debe dar 1.0f -> 100%)
-constexpr float EGG_RATIO    = 0.02f;  // 2%  de la vida
-constexpr float BABY_RATIO   = 0.08f;  // 8%  de la vida
-constexpr float CHILD_RATIO  = 0.20f;  // 20% de la vida
-constexpr float ADULT_RATIO  = 0.50f;  // 50% de la vida
-constexpr float SENIOR_RATIO = 0.20f;  // 20% de la vida
+// Subdivisión de etapas de vida (Suman 1.0f = 100%)
+constexpr float EGG_RATIO    = 0.002f; // 0.2% de la vida (~2.8 minutos en ciclo de 24h)
+constexpr float BABY_RATIO   = 0.098f; // 9.8% (~2.3 horas)
+constexpr float CHILD_RATIO  = 0.200f; // 20%  (~4.8 horas)
+constexpr float ADULT_RATIO  = 0.500f; // 50%  (~12 horas)
+constexpr float SENIOR_RATIO = 0.200f; // 20%  (~4.8 horas)
 // =========================================================================
 
 class Pet {
@@ -26,6 +26,7 @@ public:
 
     void init();
     void update(float dt);
+    void catchUpTime();
 
     void feed();
     void pet();
@@ -51,8 +52,6 @@ public:
     uint8_t getPoopCount() const { return poopCount; }
     bool isLightOn() const { return lightsOn; }
     uint32_t getAge() const { return age; }
-    void catchUpTime();
-    float autoSaveTimer = 0.0f; // Temporizador para autoguardado de 30s
 
     String getSpritePath() const;
 
@@ -70,9 +69,11 @@ private:
     bool lightsOn = true;
 
     uint32_t age = 0;
+    uint32_t lastTimestamp = 0;
+    
     float actionTimer = 0.0f;
     float poopTimer = 0.0f;
-    uint32_t lastTimestamp = 0; // Timestamp Unix del último guardado
+    float autoSaveTimer = 0.0f;
 
     void checkStateTransitions();
     void checkEvolution();

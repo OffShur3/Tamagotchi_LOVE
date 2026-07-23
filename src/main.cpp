@@ -445,22 +445,20 @@ void loop() {
                 setenv("TZ", "ART3", 1);
                 tzset();
 
-                // Usamos Google NTP como primario (Ultra rápido)
                 configTzTime("ART3", "time.google.com", "pool.ntp.org", "time.nist.gov");
                 Serial.println("[TIME] Solicitando hora real a servidores NTP...");
 
-                // BUCLE ROBUSTO: Esperar hasta 8 segundos para dar tiempo suficiente
+                // Espera a que el callback cambie la bandera
                 int retry = 0;
-                while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && retry < 80) {
+                while (!ClockWidget::isSyncedWithInternet && retry < 80) {
                     delay(100);
                     retry++;
                 }
 
-                if (sntp_get_sync_status() == SNTP_SYNC_STATUS_COMPLETED) {
-                    // El callback cbNtpSync() ya se habrá ejecutado automáticamente
-                    Serial.println("[TIME] Sincronización NTP confirmada por el hardware.");
+                if (ClockWidget::isSyncedWithInternet) {
+                    Serial.println("[TIME] Sincronización NTP confirmada en primer plano.");
                 } else {
-                    Serial.println("[TIME] Sin respuesta NTP inicial. Se continuará esperando en background...");
+                    Serial.println("[TIME] Sin respuesta NTP inicial. Continuará esperando en background.");
                 }
 
                 currentState = STATE_GAMEPLAY;
@@ -641,6 +639,7 @@ void loop() {
             }
         }
         else if (cmd == "RESET") {
+            Serial.println("\n[KERNEL] Reiniciando juego y estado interno...");
             if (game) game->resetGame();
         }
     }

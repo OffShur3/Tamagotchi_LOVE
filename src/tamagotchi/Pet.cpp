@@ -24,12 +24,12 @@ void Pet::catchUpTime() {
     if (lastTimestamp > 0 && now > lastTimestamp) {
         uint32_t elapsed = (uint32_t)(now - lastTimestamp);
         if (elapsed > 2) {
-            Serial.printf("[PET] Se detectaron %u segundos transcurridos fuera de línea. Actualizando simulación...\n", elapsed);
-            update((float)elapsed); // Simula todo el tiempo transcurrido
+            Serial.printf("[PET] Se detectaron %u segundos transcurridos. Actualizando simulación...\n", elapsed);
+            update((float)elapsed);
         }
     }
     lastTimestamp = (uint32_t)now;
-    printStats(); // Muestra el reporte con la hora ya ajustada
+    printStats();
 }
 
 void Pet::printStats() const {
@@ -58,7 +58,7 @@ void Pet::update(float dt) {
 
     age += dt;
 
-    // --- 1. AUTO-GUARDADO CADA 30 SEGUNDOS ---
+    // 1. AUTO-GUARDADO CADA 30 SEGUNDOS
     autoSaveTimer += dt;
     if (autoSaveTimer >= 30.0f) {
         autoSaveTimer = 0.0f;
@@ -66,7 +66,7 @@ void Pet::update(float dt) {
         Serial.println("[PET] Auto-guardado de rutina en SD (30s).");
     }
 
-    // --- 2. Temporizador de animaciones activas ---
+    // 2. Temporizador de animaciones activas (Comer/Feliz)
     if (actionTimer > 0.0f) {
         actionTimer -= dt;
         if (actionTimer <= 0.0f && state != PetState::Dead) {
@@ -74,45 +74,47 @@ void Pet::update(float dt) {
         }
     }
 
-    // 2. Cálculo Proporcional de Desgaste de Stats
-    if (stage != PetStage::Egg) {
-        // Multiplicadores por etapa (ej: Bebés piden más comida)
-        float stageHungerMult = (stage == PetStage::Baby) ? 1.4f : 1.0f;
-        float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.5f : 1.0f;
+    // 3. EVALUAR EVOLUCIÓN PRIMERO (Para que eclosione de inmediato si corresponde)
+    checkEvolution();
 
-        // Desgaste escalado al ciclo de vida
-        // 100% de hambre se consume en el 8% de la vida del personaje
-        float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.08f)) * stageHungerMult;
+    // 4. DESGASTE DE ESTADÍSTICAS (Aplica para Bebé, Niño, Adulto, Anciano)
+    if (stage != PetStage::Egg) {
+        float stageHungerMult = (stage == PetStage::Baby) ? 1.5f : 1.0f;
+        float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.4f : 1.0f;
+
+        // Hambre: Se consume 100% en el 6% de la vida total
+        float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.06f)) * stageHungerMult;
         hunger = max(0.0f, hunger - (hungerRate * dt));
 
-        // 100% de felicidad se consume en el 12% de la vida
-        float happinessRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f));
+        // Felicidad: Se consume 100% en el 10% de la vida total
+        float happinessRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.10f));
         happiness = max(0.0f, happiness - (happinessRate * dt));
 
-        // Mecánica de Luz y Energía
+        // Energía & Sueño
         if (!lightsOn) {
-            // Recupera energía completa en un 3% del tiempo de vida
-            float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.03f));
+            // Recupera energía completa en un 2% de la vida total
+            float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f));
             energy = min(100.0f, energy + (energyGain * dt));
             state = PetState::Sleeping;
         } else {
-            // Pierde energía en un 10% del tiempo de vida
-            float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.10f)) * stageEnergyMult;
+            // Consume energía en un 12% de la vida total
+            float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult;
             energy = max(0.0f, energy - (energyRate * dt));
         }
 
-        // Defecación proporcional (Ocurre cada ~4% de la vida total si está bien alimentado)
-        float poopInterval = TOTAL_LIFESPAN_SECONDS * 0.04f;
-        if (hunger > 50.0f && poopCount < 3) {
+        // Defecación (Ocurre cada ~2.5% de la vida total)
+        float poopInterval = TOTAL_LIFESPAN_SECONDS * 0.025f;
+        if (hunger > 40.0f && poopCount < 3) {
             poopTimer += dt;
             if (poopTimer >= poopInterval) {
                 poopCount++;
                 poopTimer = 0.0f;
                 Serial.printf("[PET] ¡La mascota hizo caca! Total: %d\n", poopCount);
+                save();
             }
         }
 
-        // Degradación de Salud por negligencia (caca no limpiada o hambre/tristeza a cero)
+        // Degradación de Salud por caca acumulada o hambre/felicidad en cero
         if (poopCount > 0 || hunger <= 0.0f || happiness <= 0.0f) {
             float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1);
             health = max(0.0f, health - (healthDropRate * dt));
@@ -120,18 +122,16 @@ void Pet::update(float dt) {
     }
 
     checkStateTransitions();
-    checkEvolution();
 }
 
 void Pet::checkEvolution() {
     if (stage == PetStage::Dead) return;
 
-    // Tiempos acumulados límite para cada etapa
     float tEgg    = TOTAL_LIFESPAN_SECONDS * EGG_RATIO;
     float tBaby   = tEgg  + (TOTAL_LIFESPAN_SECONDS * BABY_RATIO);
     float tChild  = tBaby + (TOTAL_LIFESPAN_SECONDS * CHILD_RATIO);
     float tAdult  = tChild + (TOTAL_LIFESPAN_SECONDS * ADULT_RATIO);
-    float tSenior = TOTAL_LIFESPAN_SECONDS; // Fin de vida natural
+    float tSenior = TOTAL_LIFESPAN_SECONDS; 
 
     PetStage newStage = stage;
 
@@ -141,7 +141,6 @@ void Pet::checkEvolution() {
     else if (age < tSenior)    { newStage = PetStage::Adult; }
     else if (age >= tSenior)   { newStage = PetStage::Senior; }
 
-    // Muerte por Vejez (Sucedida al agotar la etapa de Anciano)
     if (age >= TOTAL_LIFESPAN_SECONDS + (TOTAL_LIFESPAN_SECONDS * SENIOR_RATIO)) {
         stage = PetStage::Dead;
         state = PetState::Dead;
@@ -150,13 +149,11 @@ void Pet::checkEvolution() {
         return;
     }
 
-    // Transición de etapa
     if (newStage != stage) {
-        // Al eclosionar de Huevo a Bebé, asignamos la raza
         if (stage == PetStage::Egg && newStage == PetStage::Baby) {
             auto available = discoverInstalledSpecies();
             species = available[random(0, available.size())];
-            Serial.printf("[PET] ¡Eclosión! Raza elegida: %s\n", species.c_str());
+            Serial.printf("[PET] ¡Eclosión! Raza asignada: %s\n", species.c_str());
         }
 
         stage = newStage;
@@ -185,9 +182,9 @@ void Pet::feed() {
 
 void Pet::pet() {
     if (stage == PetStage::Egg) { 
-        // Tocar el huevo adelanta el tiempo de eclosión
-        age += (TOTAL_LIFESPAN_SECONDS * 0.005f); 
-        Serial.println("[PET] ¡Tocaste el huevo! Acelerando eclosión.");
+        // Tocar el huevo le suma un 1% de su vida (Acelera la eclosión)
+        age += (TOTAL_LIFESPAN_SECONDS * 0.01f); 
+        Serial.println("[PET] ¡Tocaste el huevo! Acelerando eclosión...");
         return; 
     }
     if (stage == PetStage::Dead) return;
@@ -270,7 +267,7 @@ bool Pet::load() {
     poopCount     = doc["poop"] | 0;
     lightsOn      = doc["lights"] | true;
     age           = doc["age"] | 0;
-    lastTimestamp = doc["lastTimestamp"] | 0; // Carga el último timestamp
+    lastTimestamp = doc["lastTimestamp"] | 0;
 
     return true;
 }
@@ -287,7 +284,7 @@ bool Pet::save() {
     doc["poop"]          = poopCount;
     doc["lights"]        = lightsOn;
     doc["age"]           = age;
-    doc["lastTimestamp"] = (uint32_t)time(NULL); // Guarda la hora Unix actual
+    doc["lastTimestamp"] = (uint32_t)time(NULL);
 
     SD_MMC.mkdir("/config");
     File f = SD_MMC.open("/config/save.json", "w");
@@ -303,5 +300,6 @@ void Pet::reset() {
     state = PetState::Idle;
     hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
     poopCount = 0; lightsOn = true; age = 0; actionTimer = 0.0f; poopTimer = 0.0f;
+    lastTimestamp = (uint32_t)time(NULL);
     save();
 }

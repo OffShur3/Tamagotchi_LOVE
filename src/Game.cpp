@@ -1,8 +1,7 @@
-// src/Game.cpp
 #include "Game.h"
 #include "render/SceneManager.h"
-#include "render/BaseScenes.h"
 #include "assets/AssetManager.h"
+#include "core/touch_axs5106.h"
 #include <Arduino.h>
 
 Game::Game(uint16_t width, uint16_t height) 
@@ -12,45 +11,42 @@ void Game::init() {
     lastFrameTime = millis();
     renderer.clear(0x0000);
 
-    bool backgroundBaked = false;
-
+    // Carga de Fondo de Pantalla Zero-Copy
     if (renderer.hasBackgroundBuffer()) {
         auto bgTex = AssetManager::getInstance().getTexture("/tama/ui/bg_main.png");
         if (bgTex) {
             renderer.drawToBackground(bgTex, 0, 0);
             bgTex = nullptr;
             AssetManager::getInstance().clearUnused();
-            backgroundBaked = true;
         }
     } else {
-        // --- TÉCNICA ZERO-COPY (SOLUCIÓN A LA MEMORIA) ---
-        // Le pasamos el puntero directo de la pantalla. El AssetManager va a 
-        // pintar los pixeles directamente ahí mientras lee la SD, sin gastar RAM extra.
         uint16_t* fb = renderer.getFramebuffer();
         if (fb && AssetManager::getInstance().loadPNGDirectToBuffer("/tama/ui/bg_main.png", fb)) {
-            backgroundBaked = true;
-            Serial.println("[KERNEL] MODO SRAM: Fondo cargado directo a memoria sin copias extras.");
-            
-            // Guardamos el "Backing Store" para la mascota.
             int16_t petW = 48 * 3;
             int16_t petH = 48 * 3;
-            int16_t petX = (172 - petW) / 2;
-            int16_t petY = (320 - petH) / 2;
-            
-            renderer.savePetBackingStore(petX, petY, petW, petH);
+            renderer.savePetBackingStore((172 - petW) / 2, (320 - petH) / 2, petW, petH);
         }
     }
 
-    if (!backgroundBaked) {
-        Serial.println("[KERNEL] No se pudo cargar el fondo de pantalla. Usando fondo negro por defecto.");
-    }
-
-    auto splash = std::make_shared<SplashScene>();
-    SceneManager::getInstance().changeScene(splash);
+    // Inicializar Mascota y Cargar Escena de Juego
+    pet.init();
+    petScene = std::make_shared<PetScene>(pet);
+    SceneManager::getInstance().changeScene(petScene);
 }
 
 void Game::handleInput() {
-    // Lectura del touch sensor
+    uint16_t tx = 0, ty = 0;
+    if (touch_is_pressed()) {
+        touch_get_xy(&tx, &ty);
+        
+        // Mapeo directo de la pantalla táctil invertida
+        uint16_t mapX = (tx > 172) ? 0 : (172 - tx);
+        uint16_t mapY = ty;
+
+        if (petScene) {
+            petScene->onTouch(mapX, mapY);
+        }
+    }
 }
 
 void Game::tick() {
@@ -60,6 +56,10 @@ void Game::tick() {
 
     handleInput();
 
+    // Actualizar simulación de la mascota
+    pet.update(dt);
+
+    // Actualizar gráfico de la escena actual
     SceneManager::getInstance().update(dt);
 
     auto currentScene = SceneManager::getInstance().getCurrentScene();
@@ -73,15 +73,21 @@ void Game::flush(Arduino_GFX* display) {
     display->draw16bitRGBBitmap(0, 0, renderer.getFramebuffer(), renderer.getWidth(), renderer.getHeight());
 }
 
-// --- IMPLEMENTACIONES POR DEFECTO PARA EL ORQUESTADOR ---
 void Game::saveGame() {
-    Serial.println("[GAME] Guardado de partida no implementado en la aplicacion activa.");
+    pet.save();
 }
 
 void Game::resetGame() {
-    Serial.println("[GAME] Reinicio de partida no implementado en la aplicacion activa.");
+    pet.reset();
 }
 
 void Game::redraw() {
-    // El renderizado es continuo en el loop, no requiere accion especial en el kernel base
+    // Redibujado en loop continuo
+}
+
+void Game::printStats() const {
+    pet.printStats();
+}
+void Game::onTimeSynced() {
+    pet.catchUpTime(); // Notifica a la mascota que recalcule su estado con la hora real
 }

@@ -16,7 +16,7 @@ public:
         Arduino_GFX* gfx;
         const char* githubUser;          // "OffShur3"
         const char* githubRepo;          // "Tamagotchi_LOVE"
-        const char* currentVersionPath;  // "/version.txt"
+        const char* currentVersionPath;  // "/config/version.txt"
         uint32_t checkIntervalMs;        // 300000
     };
 

@@ -13,7 +13,7 @@ public:
         Arduino_GFX* gfx;
         PNG* png;
         const char* qrPath;             // "/QR Network.png"
-        const char* jsonPath;           // "/tama/config/wifi.json" (Sincronizado)
+        const char* jsonPath;           // "/config/wifi.json" (Sincronizado)
         const char* apSSID;             // "TamaConfig"
         const char* apPassword;         // Clave AP
         void* (*pngOpen)(const char*, int32_t*);

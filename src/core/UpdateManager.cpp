@@ -433,6 +433,7 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
 }
 
 void UpdateManager::writeVersionFile(const String& version) {
+    SD_MMC.mkdir("/config");
     File file = SD_MMC.open(_cfg.currentVersionPath, "w");
     if (file) {
         file.println(version);

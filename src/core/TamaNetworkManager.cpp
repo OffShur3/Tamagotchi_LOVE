@@ -268,7 +268,7 @@ void TamaNetworkManager::handleSave() {
             Serial.println("[PORTAL] Nueva red agregada a la lista de la SD.");
         }
 
-        SD_MMC.mkdir("/tama/config");
+        SD_MMC.mkdir("/config");
 
         File writeFile = SD_MMC.open(_cfg.jsonPath, "w");
         if (writeFile) {

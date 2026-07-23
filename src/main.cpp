@@ -218,13 +218,19 @@ bool esperarSD() {
 void irADormir() {
     Serial.println("[POWER] Guardando y entrando en Deep Sleep...");
     
-    // CORRECCIÓN: Guardar partida directamente sobre el puntero base Game*
     if (game) {
         game->saveGame(); 
     }
 
     digitalWrite(TFT_BL, LOW);
     gfx->displayOff();
+
+    // --- LA MAGIA CONTRA EL REINICIO ACCIDENTAL ---
+    // Atrapamos la ejecución aquí hasta que el usuario SUELTE el botón (HIGH).
+    while (digitalRead(BOOT_PIN) == LOW) {
+        delay(10);
+    }
+    delay(100); // Debounce de seguridad para evitar rebotes eléctricos del resorte
 
     esp_sleep_enable_ext0_wakeup((gpio_num_t)BOOT_PIN, 0); 
     
@@ -367,6 +373,8 @@ void setup() {
     // 3. CARGA DE REDES MULTI-WIFI
     Serial.println("[KERNEL] Iniciando escaneo de redes en background...");
     WiFi.mode(WIFI_STA);
+    WiFi.disconnect(); // Despeja la memoria interna de red del ESP
+    delay(100);        // Da tiempo físico al módem de radiofrecuencia a encender
     
     bool tieneRedes = cargarRedesSD();
 
@@ -374,6 +382,7 @@ void setup() {
         // Escaneo ASÍNCRONO (el 'true' evita que la animación se congele)
         WiFi.scanNetworks(true); 
         connectionStartTime = millis();
+        ultimoIntentoWiFi = millis(); // Inicializamos el timeout de escaneo
         currentState = STATE_SCANNING;
     } else {
         Serial.println("[KERNEL] No se detectaron redes validas. Saltando al Popup.");
@@ -437,14 +446,19 @@ void loop() {
                     popupLaunchTime = millis();
                 }
             } else if (n == WIFI_SCAN_FAILED) {
-                Serial.println("[KERNEL] Falló el escaneo. Reintentando...");
-                WiFi.scanNetworks(true);
+                // EVITAR EL SPAM AL DRIVER: Solo reintentar cada 1 segundo
+                if (millis() - ultimoIntentoWiFi > 1000) {
+                    Serial.println("[KERNEL] Falló el escaneo. Reintentando...");
+                    WiFi.scanNetworks(true);
+                    ultimoIntentoWiFi = millis();
+                }
             }
 
             // Timeout de seguridad
             if (millis() - connectionStartTime > 15000) {
                 Serial.println("[KERNEL] Timeout de escaneo excedido. Lanzando Popup.");
-                WiFi.mode(WIFI_OFF);
+                WiFi.disconnect();
+                WiFi.mode(WIFI_OFF); // Extingue el módem
                 currentState = STATE_POPUP;
                 UIManager::drawStardewPopup(gfx);
                 popupLaunchTime = millis();
@@ -618,7 +632,9 @@ void loop() {
                 }
             }
             else if (seleccion == 2) { 
-                Serial.println("[KERNEL] Seleccionado modo Offline. Continuando...");
+                Serial.println("[KERNEL] Seleccionado modo Offline. Apagando antena WiFi y Modem...");
+                WiFi.disconnect();
+                WiFi.mode(WIFI_OFF);
                 currentState = STATE_GAMEPLAY;
             }
             break;

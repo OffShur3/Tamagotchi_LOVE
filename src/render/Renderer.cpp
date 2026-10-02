@@ -173,6 +173,14 @@ void Renderer::render(const std::vector<std::shared_ptr<RenderObject>>& objects)
             }
         }
     }
+    // --- EFECTO NOCHE / LUZ APAGADA (Atenuación al 30% de luminosidad) ---
+    if (isNightMode) {
+        for (uint32_t i = 0; i < (uint32_t)(width * height); ++i) {
+            uint16_t p = framebuffer[i];
+            // Reducción rápida de brillo en RGB565 sin gastar memoria RAM
+            framebuffer[i] = ((p >> 2) & 0x39E7);
+        }
+    }
 
     RenderContext ctx(width, height, framebuffer);
 

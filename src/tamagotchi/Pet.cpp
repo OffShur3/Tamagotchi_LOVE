@@ -1,3 +1,4 @@
+// src/tamagotchi/Pet.cpp
 #include "Pet.h"
 #include <SD_MMC.h>
 #include <ArduinoJson.h>
@@ -9,39 +10,50 @@ struct SpiRamAllocator {
 };
 typedef BasicJsonDocument<SpiRamAllocator> SpiRamJsonDocument;
 
-Pet::Pet() {}
+static float physicalTouchTimer = 0.0f;
+
+Pet::Pet() {
+    brain = std::unique_ptr<IBrain>(new Brain());
+}
+
+void Pet::setBrain(std::unique_ptr<IBrain> newBrain) {
+    if (newBrain) {
+        brain = std::move(newBrain);
+        brain->init();
+        Serial.printf("[PET] ¡Transplante de cerebro exitoso! Nuevo cerebro: %s\n", brain->getName());
+    }
+}
 
 void Pet::init() {
     if (!load()) {
         Serial.println("[PET] No se encontró partida. Inicializando huevo...");
         reset();
     }
+    if (brain) brain->init();
     catchUpTime();
 }
 
 void Pet::catchUpTime() {
     time_t now = time(NULL);
-    if (lastTimestamp > 0 && now > lastTimestamp) {
+    if (now < 1700000000) return; 
+
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+
+    if (lastTimestamp > 0 && lastTimestamp >= 1700000000 && now > lastTimestamp) {
         uint32_t elapsed = (uint32_t)(now - lastTimestamp);
 
-        // PROTECCIÓN CONTRA SALTO DE FECHA NTP (Ej. de Enero a Julio)
-        // Si el salto es mayor a 8 horas (28800s), limitamos el cálculo a 8 horas max.
-        if (elapsed > 28800) { 
-            Serial.printf("[PET] Salto de fecha detectado (%u s). Capando avance a 8 horas max.\n", elapsed);
-            elapsed = 28800; 
-        }
-
-        if (elapsed > 2) {
+        if (elapsed > 2 && elapsed <= 10800) {
             Serial.printf("[PET] Procesando %u segundos transcurridos fuera de línea...\n", elapsed);
-            
-            // Simular el tiempo en bloques de 60 segundos para una degradación suave
             uint32_t remaining = elapsed;
             while (remaining > 0) {
                 float step = (remaining > 60) ? 60.0f : (float)remaining;
                 update(step);
                 remaining -= (uint32_t)step;
             }
-            save(); // Guardar resultado final una sola vez
+            save(); 
+        } else if (elapsed > 10800) {
+            Serial.printf("[PET] Gran salto temporal detectado (%u s). Sincronizando hora sin penalización.\n", elapsed);
+            save();
         }
     }
     lastTimestamp = (uint32_t)now;
@@ -63,19 +75,37 @@ void Pet::printStats() const {
     Serial.printf("  Salud:       %.1f / 100\n", health);
     Serial.printf("  Cacas:       %d / 3\n", poopCount);
     Serial.printf("  Luz:         %s\n", lightsOn ? "ENCENDIDA" : "APAGADA");
-    Serial.printf("  Edad:        %u segs (%.1f%% de vida alcanzado)\n", age, lifePercent);
-    Serial.printf("  Ciclo Config: %.0f segs (%.1f hrs / %.1f días)\n", 
-                  TOTAL_LIFESPAN_SECONDS, TOTAL_LIFESPAN_SECONDS / 3600.0f, TOTAL_LIFESPAN_SECONDS / 86400.0f);
+    Serial.printf("  Edad:        %u segs (%.1f%% de vida)\n", (uint32_t)age, lifePercent);
+    Serial.println("---------------------------------");
+    Serial.printf("  CEREBRO:     %s\n", brain ? brain->getName() : "Sin Cerebro");
+    Serial.printf("  Pensamiento: %s\n", getThoughtIcon() >= 0 ? "Activo en Pantalla" : "En reposo");
+    Serial.printf("  Spike Rate:  %.2f spikes/sec (Hz)\n", brain ? brain->getSpikeRate() : 0.0f);
+    Serial.printf("  Dopamina:    %.2f / 2.00\n", brain ? brain->getDopamineLevel() : 0.0f);
+    Serial.printf("  Stress/Pain: %.2f\n", brain ? brain->getStressLevel() : 0.0f);
+    
+    if (brain) {
+        Brain* b = static_cast<Brain*>(brain.get());
+        Serial.println("---------------------------------");
+        Serial.println("      IMPULSOS COGNITIVOS        ");
+        Serial.println("---------------------------------");
+        Serial.printf("  Urgencia Hambre:  %.1f %%\n", b->getHungerDrive());
+        Serial.printf("  Urgencia Social:  %.1f %%\n", b->getSocialDrive());
+        Serial.printf("  Urgencia Fatiga:  %.1f %%\n", b->getSleepDrive());
+        Serial.printf("  Nivel Malestar:   %.1f %%\n", b->getDistressDrive());
+    }
     Serial.println("=================================\n");
 }
 
 void Pet::update(float dt) {
-    if (stage == PetStage::Dead) return;
+    if (stage == PetStage::Dead || state == PetState::Dead) {
+        stage = PetStage::Dead;
+        state = PetState::Dead;
+        return;
+    }
 
     age += dt;
 
-    // 1. AUTO-GUARDADO CADA 30 SEGUNDOS (Solo si no estamos en catch-up masivo)
-    if (dt < 2.0f) { // Evita spams si dt es grande
+    if (dt < 2.0f) { 
         autoSaveTimer += dt;
         if (autoSaveTimer >= 30.0f) {
             autoSaveTimer = 0.0f;
@@ -84,18 +114,19 @@ void Pet::update(float dt) {
         }
     }
 
-    // 2. Temporizador de animaciones táctiles
     if (actionTimer > 0.0f) {
         actionTimer -= dt;
         if (actionTimer <= 0.0f && state != PetState::Dead) {
-            state = PetState::Idle;
+            state = (happiness < 25.0f || hunger < 25.0f) ? PetState::Sad : PetState::Idle;
         }
     }
 
-    // 3. EVOLUCIÓN
+    if (physicalTouchTimer > 0.0f) {
+        physicalTouchTimer -= dt;
+    }
+
     checkEvolution();
 
-    // 4. DESGASTE DE ESTADÍSTICAS
     if (stage != PetStage::Egg) {
         float stageHungerMult = (stage == PetStage::Baby) ? 1.5f : 1.0f;
         float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.4f : 1.0f;
@@ -107,9 +138,22 @@ void Pet::update(float dt) {
         happiness = max(0.0f, happiness - (happinessRate * dt));
 
         if (!lightsOn) {
-            float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f));
-            energy = min(100.0f, energy + (energyGain * dt));
-            state = PetState::Sleeping;
+            if (state == PetState::Sleeping) {
+                float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f));
+                energy = min(100.0f, energy + (energyGain * dt));
+                if (energy >= 100.0f) {
+                    energy = 100.0f;
+                    state = PetState::Idle;
+                    Serial.println("[PET] Mascota recuperó el 100% de energía. Se despertó sola.");
+                }
+            } else {
+                if (energy >= 100.0f) {
+                    energy = 100.0f;
+                } else {
+                    float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.20f));
+                    energy = max(0.0f, energy - (energyRate * dt));
+                }
+            }
         } else {
             float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult;
             energy = max(0.0f, energy - (energyRate * dt));
@@ -131,16 +175,23 @@ void Pet::update(float dt) {
         }
     }
 
+    if (brain) {
+        PetSensoryInput input = {
+            hunger, energy, happiness, health, poopCount, lightsOn,
+            (physicalTouchTimer > 0.0f)
+        };
+        brain->update(dt, input);
+    }
+
     checkStateTransitions();
 }
 
 void Pet::checkEvolution() {
-    if (stage == PetStage::Dead) return;
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
 
     float tEgg    = TOTAL_LIFESPAN_SECONDS * EGG_RATIO;
     float tBaby   = tEgg  + (TOTAL_LIFESPAN_SECONDS * BABY_RATIO);
     float tChild  = tBaby + (TOTAL_LIFESPAN_SECONDS * CHILD_RATIO);
-    float tAdult  = tChild + (TOTAL_LIFESPAN_SECONDS * ADULT_RATIO);
     float tSenior = TOTAL_LIFESPAN_SECONDS; 
 
     PetStage newStage = stage;
@@ -173,46 +224,67 @@ void Pet::checkEvolution() {
 }
 
 void Pet::checkStateTransitions() {
-    if (health <= 0.0f) { stage = PetStage::Dead; state = PetState::Dead; return; }
+    if (stage == PetStage::Dead || state == PetState::Dead || health <= 0.0f) { 
+        stage = PetStage::Dead; 
+        state = PetState::Dead; 
+        return; 
+    }
+    
+    // Si hay una acción de interacción física deliberada en curso (comer durante 2.5s), no sobreescribir
     if (actionTimer > 0.0f) return;
 
-    if (!lightsOn) { state = PetState::Sleeping; return; }
-    if (health < 40.0f) { state = PetState::Sick; }
-    else if (happiness < 30.0f) { state = PetState::Sad; }
-    else { state = PetState::Idle; }
+    if (brain) {
+        state = brain->getDecision();
+    }
 }
 
+// SOLUCIÓN: Único disparador de Eating en el sistema
 void Pet::feed() {
-    if (stage == PetStage::Egg || stage == PetStage::Dead) return;
+    if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     hunger = min(100.0f, hunger + 35.0f);
     state = PetState::Eating;
-    actionTimer = 2.5f;
+    actionTimer = 2.5f; // Come activamente durante 2.5 segundos
+    
+    if (brain) {
+        brain->emitReward(0.3f);
+        brain->onFed(); // Reinicia el sensor neuronal de hambre
+    }
+    Serial.println("[PET] Alimentando a la mascota. Estado Eating activo (2.5s).");
     save();
 }
 
 void Pet::pet() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
     if (stage == PetStage::Egg) { 
-        // 1 toque acelera el 1% de la vida total
         age += (TOTAL_LIFESPAN_SECONDS * 0.005f); 
         Serial.println("[PET] ¡Tocaste el huevo! Acelerando eclosión...");
         return; 
     }
-    if (stage == PetStage::Dead) return;
     happiness = min(100.0f, happiness + 25.0f);
-    state = PetState::Happy;
-    actionTimer = 2.0f;
+    
+    if (happiness >= 35.0f) {
+        state = PetState::Happy;
+        actionTimer = 2.5f;
+    } else {
+        Serial.println("[PET] Acariciaste a la mascota, pero sigue triste.");
+    }
+
+    physicalTouchTimer = 0.3f;
+    if (brain) brain->emitReward(0.6f);
     save();
 }
 
 void Pet::heal() {
-    if (stage == PetStage::Egg || stage == PetStage::Dead) return;
+    if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     health = min(100.0f, health + 60.0f);
     state = PetState::Happy;
     actionTimer = 2.0f;
+    if (brain) brain->emitReward(0.5f);
     save();
 }
 
 void Pet::clean() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
     if (poopCount > 0) {
         poopCount = 0;
         poopTimer = 0.0f;
@@ -223,19 +295,74 @@ void Pet::clean() {
 }
 
 void Pet::toggleLights() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    bool wasSleeping = (state == PetState::Sleeping);
     lightsOn = !lightsOn;
     Serial.printf("[PET] Luz %s\n", lightsOn ? "Encendida" : "Apagada");
+
+    if (lightsOn && wasSleeping) {
+        if (energy < 75.0f) {
+            state = PetState::Sad;
+            actionTimer = 3.0f;
+            happiness = max(0.0f, happiness - 20.0f);
+            Serial.printf("[PET] ¡Luz encendida bruscamente (Energía: %.1f%% < 75%%)! Mascota despertada con estrés.\n", energy);
+            if (brain) {
+                brain->emitReward(-0.8f);
+            }
+        } else {
+            state = PetState::Idle;
+            Serial.printf("[PET] La mascota descansó bien (Energía: %.1f%% >= 75%%). Despertó con calma.\n", energy);
+        }
+    }
+    save();
+}
+
+void Pet::forcePoop() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    poopCount = min(3, poopCount + 1);
+    Serial.printf("[TEST] Caca forzada. Total en suelo: %d\n", poopCount);
+    save();
+}
+
+void Pet::drainEnergy(float amount) {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    energy = max(0.0f, energy - amount);
+    Serial.printf("[TEST] Energía drenada a: %.1f\n", energy);
+    save();
+}
+
+void Pet::makeSick() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    health = max(0.0f, health - 50.0f);
+    Serial.printf("[TEST] Salud reducida a: %.1f\n", health);
+    save();
+}
+
+void Pet::accelerateAge(float seconds) {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    age += seconds;
+    Serial.printf("[TEST] Tiempo acelerado en +%.0f s. Nueva edad: %.0f s\n", seconds, age);
+    checkEvolution();
     save();
 }
 
 String Pet::getSpritePath() const {
     String folder = stageToString(stage);
     String anim   = stateToString(state);
-    String basePath = "/tama/sprites/base/" + species + "/" + folder + "/" + anim;
 
-    if (SD_MMC.exists(basePath + ".png")) return basePath + ".png";
-    if (SD_MMC.exists(basePath)) return basePath;
-    return "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
+    String target = "/tama/sprites/base/" + species + "/" + folder + "/" + anim + ".png";
+    if (SD_MMC.exists(target)) return target;
+
+    String fallbackIdle = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
+    if (SD_MMC.exists(fallbackIdle)) return fallbackIdle;
+
+    String tiernitoTarget = "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
+    if (SD_MMC.exists(tiernitoTarget)) return tiernitoTarget;
+
+    String tiernitoIdle = "/tama/sprites/base/tiernito/" + folder + "/idle.png";
+    if (SD_MMC.exists(tiernitoIdle)) return tiernitoIdle;
+
+    return "/tama/sprites/base/tiernito/huevo/idle.png";
 }
 
 std::vector<String> Pet::discoverInstalledSpecies() {

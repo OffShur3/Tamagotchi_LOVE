@@ -22,6 +22,8 @@ public:
     const uint16_t* getFramebuffer() const { return framebuffer; }
     uint16_t getWidth() const { return width; }
     uint16_t getHeight() const { return height; }
+    void setNightMode(bool night) { isNightMode = night; }
+
 
 private:
     uint16_t width;
@@ -33,4 +35,7 @@ private:
     File bgFile; 
     int16_t petX, petY, petW, petH;
     bool petBackingStoreSaved;
+
+    bool isNightMode = false;
+
 };

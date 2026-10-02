@@ -1,24 +1,19 @@
+// src/tamagotchi/Pet.h
 #pragma once
 #include "PetDef.h"
+#include "brain/IBrain.h"
+#include "brain/Brain.h"
 #include <Arduino.h>
+#include <memory>
 #include <vector>
 
-// =========================================================================
-//  CONFIGURACIÓN DEL CICLO DE VIDA DE LA MASCOTA
-// =========================================================================
-// Modifica esta variable para ajustar la escala de tiempo total:
-//   - 300.0f     : Modo Test Express (5 Minutos totales)
-//   - 86400.0f   : Modo Test Diario (1 Día = 24 Horas)
-//   - 2592000.0f : Modo Realismo (1 Mes = 30 Días)
 constexpr float TOTAL_LIFESPAN_SECONDS = 86400.0f; 
 
-// Subdivisión de etapas de vida (Suman 1.0f = 100%)
-constexpr float EGG_RATIO    = 0.002f; // 0.2% de la vida (~2.8 minutos en ciclo de 24h)
-constexpr float BABY_RATIO   = 0.098f; // 9.8% (~2.3 horas)
-constexpr float CHILD_RATIO  = 0.200f; // 20%  (~4.8 horas)
-constexpr float ADULT_RATIO  = 0.500f; // 50%  (~12 horas)
-constexpr float SENIOR_RATIO = 0.200f; // 20%  (~4.8 horas)
-// =========================================================================
+constexpr float EGG_RATIO    = 0.002f; 
+constexpr float BABY_RATIO   = 0.098f; 
+constexpr float CHILD_RATIO  = 0.200f; 
+constexpr float ADULT_RATIO  = 0.500f; 
+constexpr float SENIOR_RATIO = 0.200f; 
 
 class Pet {
 public:
@@ -34,7 +29,33 @@ public:
     void clean();
     void toggleLights();
 
+    // SOLUCIÓN: La muerte forzada es terminal e irreversible
+    void forceState(PetState newState) {
+        state = newState;
+        if (newState == PetState::Dead) {
+            stage = PetStage::Dead;
+            health = 0.0f;
+            actionTimer = 0.0f; // Sin temporizador: muerte permanente
+            Serial.println("[DEBUG] Muerte permanente. El Tamagotchi no resucitará. Usa 'RESET' para una nueva partida.");
+        } else {
+            actionTimer = 5.0f; // 5 segundos para apreciar animaciones temporales
+            Serial.printf("[DEBUG] Estado forzado a: %s (5 segundos)\n", stateToString(newState).c_str());
+        }
+        save();
+    }
+
+    void forcePoop();
+    void drainEnergy(float amount = 50.0f);
+    void makeSick();
+    void accelerateAge(float seconds = 3600.0f);
+
+    void setBrain(std::unique_ptr<IBrain> newBrain);
+
     void printStats() const;
+    // Consulta del icono mental activo para el globo
+    int getThoughtIcon() const {
+        return brain ? static_cast<Brain*>(brain.get())->getActiveThought() : -1;
+    }
 
     bool load();
     bool save();
@@ -74,6 +95,8 @@ private:
     float actionTimer = 0.0f;
     float poopTimer = 0.0f;
     float autoSaveTimer = 0.0f;
+
+    std::unique_ptr<IBrain> brain;
 
     void checkStateTransitions();
     void checkEvolution();

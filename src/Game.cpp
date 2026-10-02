@@ -1,3 +1,4 @@
+// src/Game.cpp
 #include "Game.h"
 #include "render/SceneManager.h"
 #include "assets/AssetManager.h"
@@ -34,10 +35,14 @@ void Game::init() {
 
 void Game::handleInput() {
     uint16_t tx = 0, ty = 0;
-    // LECTURA TÁCTIL UNIFICADA
     if (touch_read(tx, ty)) {
         if (petScene) {
             petScene->onTouch(tx, ty);
+        }
+    } else {
+        // Notificar que se levantó el dedo para resetear la caricia
+        if (petScene) {
+            petScene->onTouchReleased();
         }
     }
 }
@@ -53,6 +58,9 @@ void Game::tick() {
 
     pet.update(dt);
     SceneManager::getInstance().update(dt);
+
+    // Conectar automáticamente la luz de la mascota al filtro nocturno del Renderer
+    renderer.setNightMode(!pet.isLightOn());
 
     auto currentScene = SceneManager::getInstance().getCurrentScene();
     if (currentScene) {

@@ -1,3 +1,4 @@
+// src/Game.h
 #pragma once 
 #include "render/Renderer.h"
 #include "tamagotchi/Pet.h"
@@ -17,10 +18,23 @@ public:
     void saveGame();
     void resetGame();
     void redraw();
-    void printStats() const; // <-- EXPONEMOS EL MÉTODO AL KERNEL
+    void printStats() const; 
     void onTimeSynced();
     
-    uint16_t* getFramebuffer() { return renderer.getFramebuffer(); }
+    // Métodos delegados al módulo Pet para comandos interactivos y de depuración
+    void forcePetState(PetState s) { pet.forceState(s); }
+    void startMinigame()           { if (petScene) petScene->startMinigame(); }
+    void petFeed()                 { pet.feed(); }
+    void petPet()                  { pet.pet(); }
+    void petHeal()                 { pet.heal(); }
+    void petClean()                { pet.clean(); }
+    void petToggleLights()         { pet.toggleLights(); }
+    void petForcePoop()            { pet.forcePoop(); }
+    void petDrainEnergy()          { pet.drainEnergy(); }
+    void petMakeSick()             { pet.makeSick(); }
+    void petAccelerateAge()        { pet.accelerateAge(3600.0f); }
+
+    uint16_t* getFramebuffer()     { return renderer.getFramebuffer(); }
 
 private:
     Renderer renderer;

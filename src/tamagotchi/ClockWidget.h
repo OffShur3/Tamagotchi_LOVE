@@ -1,11 +1,18 @@
+// src/tamagotchi/ClockWidget.h
 #pragma once
 #include "../render/RenderObject.h"
 #include <time.h>
 
 class ClockWidget : public RenderObject {
 public:
-    // Flag global para ocultar el reloj si no hay sincronización de Internet
-    inline static bool isSyncedWithInternet = false; 
+    // Variable estática estándar compatible con C++11 (sin warning de inline)
+    static bool& getSyncState() {
+        static bool synced = false;
+        return synced;
+    }
+    
+    // Macro de compatibilidad
+    #define isSyncedWithInternet getSyncState()
 
     ClockWidget() {
         layer = RenderLayer::UI;
@@ -15,13 +22,11 @@ public:
     Size2 getSize() const override { return {54, 18}; }
 
     void draw(RenderContext& ctx) override {
-        // SOLO DIBUJAR EN PANTALLA SI SE SINCRO POR INTERNET
         if (!visible || !isSyncedWithInternet) return;
 
-        // Paleta Stardew Valley
-        uint16_t borderDark  = 0x2104; // Marrón oscuro
-        uint16_t bgBox       = 0x4903; // Marrón Madera (#4C2818)
-        uint16_t textColor   = 0xFFEC; // Crema / Dorado (#FFF3A0)
+        uint16_t borderDark  = 0x2104; 
+        uint16_t bgBox       = 0x4903; 
+        uint16_t textColor   = 0xFFEC; 
 
         int16_t bx = position.x;
         int16_t by = position.y;

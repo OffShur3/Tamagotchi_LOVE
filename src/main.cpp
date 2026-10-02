@@ -7,7 +7,7 @@
 #include <PNGdec.h>
 #include <WiFiMulti.h> 
 #include <ArduinoJson.h> 
-#include <esp_sntp.h> // <-- Callback de NTP nativo
+#include <esp_sntp.h> 
 #include "Game.h"
 #include "assets/AssetManager.h"
 #include "render/SceneManager.h"
@@ -34,7 +34,6 @@
 #define RETRO_WHITE 0xFFFF 
 
 enum KernelState {
-    STATE_SCANNING,
     STATE_CONNECTING,
     STATE_GAMEPLAY,
     STATE_POPUP,
@@ -42,7 +41,6 @@ enum KernelState {
     STATE_POPUP_UPDATE
 };
 
-// --- DECLARACIONES DE FUNCIONES ---
 void* pngOpen(const char *filename, int32_t *size);
 void pngClose(void *handle);
 int32_t pngRead(PNGFILE *handle, uint8_t *buffer, int32_t length);
@@ -60,7 +58,6 @@ void dibujarPopupStardew();
 void dibujarPantallaPortal();
 
 PNG png;
-WiFiMulti wifiMulti; 
 std::vector<std::pair<String, String>> redesGuardadas;
 int intentoRedActual = 0;
 unsigned long ultimoIntentoWiFi = 0;
@@ -83,8 +80,8 @@ bool updateInProgress = false;
 bool mandatoryUpdate = false;
 
 volatile bool peticionDormir = false;
+volatile bool ntpSyncPending = false;
 
-// --- CALLBACK NATIVO ESP-IDF CUANDO EL PAQUETE NTP LLEGA DESDE INTERNET ---
 void cbNtpSync(struct timeval *tv) {
     time_t realNow = tv->tv_sec;
     struct tm tInfo;
@@ -93,12 +90,8 @@ void cbNtpSync(struct timeval *tv) {
     Serial.printf("\n[TIME] ¡EVENTO NTP! Hora real recibida de Internet: [%02d:%02d:%02d]\n", 
                   tInfo.tm_hour, tInfo.tm_min, tInfo.tm_sec);
     
-    // Activa el cartel en pantalla
     ClockWidget::isSyncedWithInternet = true;
-
-    if (game) {
-        game->onTimeSynced(); // Ajusta el delta de vida acumulado
-    }
+    ntpSyncPending = true;
 }
 
 void IRAM_ATTR isrBotonBoot() {
@@ -157,9 +150,7 @@ bool detectarSwipeRight() {
             delay(10);
             if (leerTouch(curX, curY)) {
                 if (curX > startX && (curX - startX) > 40) {
-                    while (leerTouch(curX, curY)) {
-                        delay(10);
-                    }
+                    while (leerTouch(curX, curY)) delay(10);
                     return true;
                 }
             }
@@ -246,7 +237,7 @@ bool cargarRedesSD() {
         const char* pass = obj["pass"];
         if (ssid && strlen(ssid) > 0) {
             redesGuardadas.push_back({String(ssid), String(pass)});
-            Serial.printf("[KERNEL] Red encolada: %s\n", ssid);
+            Serial.printf("[KERNEL] Red encolada para conexión: %s\n", ssid);
         }
     }
     return !redesGuardadas.empty();
@@ -296,12 +287,10 @@ void setup() {
 
     esperarSD();
 
-    // 1. ZONA HORARIA Y CALLBACK DE NOTIFICACIÓN DE RED
     setenv("TZ", "ART3", 1);
     tzset();
-    sntp_set_time_sync_notification_cb(cbNtpSync); // Se ejecutará solo cuando la hora llegue
+    sntp_set_time_sync_notification_cb(cbNtpSync);
 
-    // 2. FALLBACK A 08:00 AM SI NO HAY RELOJ PREVIO
     time_t now = time(NULL);
     struct tm *timeinfo = localtime(&now);
     if (timeinfo->tm_year < 120) { 
@@ -309,17 +298,16 @@ void setup() {
         tm_fallback.tm_year = 2026 - 1900;
         tm_fallback.tm_mon  = 0;
         tm_fallback.tm_mday = 1;
-        tm_fallback.tm_hour = 8; // 08:00 AM LOCAL
+        tm_fallback.tm_hour = 8;
         tm_fallback.tm_min  = 0;
         tm_fallback.tm_sec  = 0;
 
         time_t fallback_epoch = mktime(&tm_fallback); 
         struct timeval tv = { .tv_sec = fallback_epoch, .tv_usec = 0 };
         settimeofday(&tv, NULL);
-        Serial.println("[TIME] Sin Internet previo. RTC inicializado en fallback: 08:00 AM (ART).");
+        Serial.println("[TIME] RTC inicializado en fallback: 08:00 AM (ART).");
     }
 
-    // Por defecto ocultamos el reloj hasta confirmar respuesta de Internet
     ClockWidget::isSyncedWithInternet = false;
 
     String versionArranque = "v0.0.0";
@@ -332,7 +320,6 @@ void setup() {
         }
     }
     Serial.println("\n-------------------------------");
-    Serial.println("Inicializando...");
     Serial.printf("TAMA %s\n", versionArranque.c_str());
     Serial.println("-------------------------------\n");
 
@@ -352,7 +339,6 @@ void setup() {
     game->tick();
     game->flush(gfx);
 
-    Serial.println("[KERNEL] Iniciando escaneo de redes en background...");
     WiFi.mode(WIFI_STA);
     WiFi.disconnect();
     delay(100);
@@ -360,10 +346,13 @@ void setup() {
     bool tieneRedes = cargarRedesSD();
 
     if (tieneRedes) {
-        WiFi.scanNetworks(true); 
+        intentoRedActual = 0;
+        Serial.printf("[KERNEL] Conectando de forma directa a: %s...\n", redesGuardadas[0].first.c_str());
+        WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
+        
         connectionStartTime = millis();
         ultimoIntentoWiFi = millis();
-        currentState = STATE_SCANNING;
+        currentState = STATE_CONNECTING;
     } else {
         WiFi.mode(WIFI_OFF);
         currentState = STATE_POPUP;
@@ -378,7 +367,14 @@ void loop() {
         irADormir();
     }
 
-    if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_SCANNING || currentState == STATE_CONNECTING)) {
+    if (ntpSyncPending) {
+        ntpSyncPending = false;
+        if (game) {
+            game->onTimeSynced(); 
+        }
+    }
+
+    if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_CONNECTING)) {
         game->tick();
 
         if (updateAvailable && !updateInProgress && currentState == STATE_GAMEPLAY) {
@@ -389,58 +385,9 @@ void loop() {
     }
 
     switch (currentState) {
-        case STATE_SCANNING: {
-            int n = WiFi.scanComplete();
-            if (n >= 0) {
-                std::vector<std::pair<String, String>> redesDisponibles;
-                for (int i = 0; i < n; ++i) {
-                    String ssid = WiFi.SSID(i);
-                    for (const auto& red : redesGuardadas) {
-                        if (red.first == ssid) {
-                            redesDisponibles.push_back(red);
-                            break; 
-                        }
-                    }
-                }
-                WiFi.scanDelete(); 
-
-                if (!redesDisponibles.empty()) {
-                    redesGuardadas = redesDisponibles; 
-                    Serial.printf("[KERNEL] Red al alcance: %s. Conectando...\n", redesGuardadas[0].first.c_str());
-                    WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
-                    ultimoIntentoWiFi = millis();
-                    intentoRedActual = 0;
-                    currentState = STATE_CONNECTING;
-                } else {
-                    Serial.println("[KERNEL] Ninguna red guardada está al alcance. Pasando a Offline.");
-                    WiFi.disconnect();
-                    WiFi.mode(WIFI_OFF);
-                    currentState = STATE_POPUP;
-                    UIManager::drawStardewPopup(gfx);
-                    popupLaunchTime = millis();
-                }
-            } else if (n == WIFI_SCAN_FAILED) {
-                if (millis() - ultimoIntentoWiFi > 1000) {
-                    Serial.println("[KERNEL] Falló el escaneo. Reintentando...");
-                    WiFi.scanNetworks(true);
-                    ultimoIntentoWiFi = millis();
-                }
-            }
-
-            if (millis() - connectionStartTime > 15000) {
-                Serial.println("[KERNEL] Timeout de escaneo excedido. Lanzando Popup.");
-                WiFi.disconnect();
-                WiFi.mode(WIFI_OFF);
-                currentState = STATE_POPUP;
-                UIManager::drawStardewPopup(gfx);
-                popupLaunchTime = millis();
-            }
-            break;
-        }
-
         case STATE_CONNECTING: {
             if (WiFi.status() == WL_CONNECTED) {
-                Serial.println("[KERNEL] WiFi conectado con éxito.");
+                Serial.printf("\n[KERNEL] ¡WiFi Conectado con éxito a: %s!\n", redesGuardadas[intentoRedActual].first.c_str());
                 
                 setenv("TZ", "ART3", 1);
                 tzset();
@@ -448,36 +395,32 @@ void loop() {
                 configTzTime("ART3", "time.google.com", "pool.ntp.org", "time.nist.gov");
                 Serial.println("[TIME] Solicitando hora real a servidores NTP...");
 
-                // Espera a que el callback cambie la bandera
                 int retry = 0;
-                while (!ClockWidget::isSyncedWithInternet && retry < 80) {
+                while (!ClockWidget::isSyncedWithInternet && retry < 60) {
                     delay(100);
                     retry++;
                 }
 
-                if (ClockWidget::isSyncedWithInternet) {
-                    Serial.println("[TIME] Sincronización NTP confirmada en primer plano.");
-                } else {
-                    Serial.println("[TIME] Sin respuesta NTP inicial. Continuará esperando en background.");
-                }
-
                 currentState = STATE_GAMEPLAY;
             } else {
-                if (millis() - ultimoIntentoWiFi > 5000) {
+                if (millis() - ultimoIntentoWiFi > 6000) {
                     intentoRedActual++;
-                    if (intentoRedActual < redesGuardadas.size()) {
+                    if (intentoRedActual < (int)redesGuardadas.size()) {
+                        Serial.printf("[KERNEL] Probando siguiente red en cola: %s...\n", redesGuardadas[intentoRedActual].first.c_str());
                         WiFi.disconnect();
                         WiFi.begin(redesGuardadas[intentoRedActual].first.c_str(), redesGuardadas[intentoRedActual].second.c_str());
                         ultimoIntentoWiFi = millis();
                     } else {
                         intentoRedActual = 0; 
+                        WiFi.disconnect();
+                        WiFi.begin(redesGuardadas[0].first.c_str(), redesGuardadas[0].second.c_str());
                         ultimoIntentoWiFi = millis();
                     }
                 }
             }
 
-            if (millis() - connectionStartTime > 20000) { 
-                Serial.println("[KERNEL] Timeout de WiFi excedido. Lanzando Popup.");
+            if (millis() - connectionStartTime > 15000) { 
+                Serial.println("[KERNEL] Timeout de conexión excedido. Pasando a Offline.");
                 WiFi.disconnect();
                 WiFi.mode(WIFI_OFF);
                 currentState = STATE_POPUP;
@@ -508,7 +451,6 @@ void loop() {
                     latestVersion = updateManager.getLatestVersion();
                     if (updateManager.needMandatoryUpdate()) mandatoryUpdate = true;
                 } else {
-                    // Dar un pequeño margen de 1.5s antes de apagar el Wi-Fi por si el paquete NTP venía en camino
                     if (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED) {
                         int margin = 0;
                         while (sntp_get_sync_status() != SNTP_SYNC_STATUS_COMPLETED && margin < 15) {
@@ -517,7 +459,7 @@ void loop() {
                         }
                     }
 
-                    Serial.println("[MAIN] Confirmación NUBE V. Identica. Sistema Inicia Fase Offline, Extinguiendo Radar");
+                    Serial.println("[MAIN] Confirmación NUBE: Version Identica. Sistema pasa a Offline.");
                     WiFi.disconnect();
                     WiFi.mode(WIFI_OFF);
                 }
@@ -610,8 +552,78 @@ void loop() {
         cmd.trim();
         cmd.toUpperCase(); 
 
-        if (cmd == "STATS" || cmd == "STATUS" || cmd == "PET" || cmd == "TAMA" || cmd == "INFO") {
+        if (cmd == "HELP") {
+            Serial.println("\n==================================================");
+            Serial.println("         TAMA KERNEL - COMANDOS DISPONIBLES       ");
+            Serial.println("==================================================");
+            Serial.println("  STATS / INFO : Diagnostico de mascota y cerebro");
+            Serial.println("  PLAY / GAME  : Iniciar minijuego de adivinanza");
+            Serial.println("  FEED         : Alimentar a la mascota");
+            Serial.println("  PET          : Acariciar a la mascota");
+            Serial.println("  POOP         : Forzar caca en el suelo");
+            Serial.println("  CLEAN        : Limpiar el suelo");
+            Serial.println("  HEAL         : Curar enfermedad / medicina");
+            Serial.println("  TIRED        : Drenar energia (-50)");
+            Serial.println("  LIGHTS       : Encender / Apagar la luz");
+            Serial.println("  EVOLVE       : Acelerar edad (+1 hora)");
+            Serial.println("  RESET        : Reiniciar partida de la mascota");
+            Serial.println("  DEBUG        : Alternar modo depuracion visual");
+            Serial.println("  WIFI         : Apagar antena WiFi");
+            Serial.println("  STATE <nom>  : Forzar estado (Solo MODO DEBUG)");
+            Serial.println("==================================================");
+        }
+        else if (cmd == "STATS" || cmd == "STATUS" || cmd == "PET" || cmd == "TAMA" || cmd == "INFO") {
             if (game) game->printStats();
+        }
+        else if (cmd == "PLAY" || cmd == "GAME") {
+            if (game) game->startMinigame();
+        }
+        else if (cmd == "FEED") {
+            if (game) game->petFeed();
+        }
+        else if (cmd == "PET") {
+            if (game) game->petPet();
+        }
+        else if (cmd == "POOP") {
+            if (game) game->petForcePoop();
+        }
+        else if (cmd == "CLEAN") {
+            if (game) game->petClean();
+        }
+        else if (cmd == "HEAL") {
+            if (game) game->petHeal();
+        }
+        else if (cmd == "TIRED") {
+            if (game) game->petDrainEnergy();
+        }
+        else if (cmd == "SICK") {
+            if (game) game->petMakeSick();
+        }
+        else if (cmd == "LIGHTS") {
+            if (game) game->petToggleLights();
+        }
+        else if (cmd == "EVOLVE") {
+            if (game) game->petAccelerateAge();
+        }
+        // --- FORZADO DE ESTADOS: EXCLUSIVO DE MODO DEBUG ---
+        else if (cmd.startsWith("STATE ") || cmd.startsWith("SET ")) {
+            if (!debugMode) {
+                Serial.println("[KERNEL] ERROR: Los comandos de forzado de estado solo estan permitidos con MODO DEBUG activo.");
+            } else {
+                String target = cmd.substring(cmd.indexOf(' ') + 1);
+                target.trim();
+                
+                if (target == "IDLE")                    game->forcePetState(PetState::Idle);
+                else if (target == "HAPPY")              game->forcePetState(PetState::Happy);
+                else if (target == "EATING")             game->forcePetState(PetState::Eating);
+                else if (target == "SLEEPING" || target == "SLEEP") game->forcePetState(PetState::Sleeping);
+                else if (target == "SICK")               game->forcePetState(PetState::Sick);
+                else if (target == "SAD")                game->forcePetState(PetState::Sad);
+                else if (target == "DEAD")               game->forcePetState(PetState::Dead);
+                else {
+                    Serial.printf("[DEBUG] Estado desconocido '%s'. Opciones: IDLE, HAPPY, EATING, SLEEPING, SICK, SAD, DEAD\n", target.c_str());
+                }
+            }
         }
         else if (cmd == "DEBUG") {
             bool nextState = false;

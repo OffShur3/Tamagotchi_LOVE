@@ -73,29 +73,19 @@ void Pet::printStats() const {
     Serial.printf("  Felicidad:   %.1f / 100\n", happiness);
     Serial.printf("  Energía:     %.1f / 100\n", energy);
     Serial.printf("  Salud:       %.1f / 100\n", health);
+    Serial.printf("  Apego/Trust: %.1f / 100\n", trust);
     Serial.printf("  Cacas:       %d / 3\n", poopCount);
+    Serial.printf("  Digestión:   %s (Timer: %.0fs)\n", digesting ? "EN CURSO" : "INACTIVA", digestiveTransitTimer);
     Serial.printf("  Luz:         %s\n", lightsOn ? "ENCENDIDA" : "APAGADA");
     Serial.printf("  Edad:        %u segs (%.1f%% de vida)\n", (uint32_t)age, lifePercent);
     Serial.println("---------------------------------");
     Serial.printf("  CEREBRO:     %s\n", brain ? brain->getName() : "Sin Cerebro");
-    Serial.printf("  Pensamiento: %s\n", (stage == PetStage::Egg) ? "Inconsciente (Huevo)" : (getThoughtIcon() >= 0 ? "Activo en Pantalla" : "En reposo"));
     Serial.printf("  Spike Rate:  %.2f spikes/sec (Hz)\n", brain ? brain->getSpikeRate() : 0.0f);
     Serial.printf("  Dopamina:    %.2f / 2.00\n", brain ? brain->getDopamineLevel() : 0.0f);
     Serial.printf("  Stress/Pain: %.2f\n", brain ? brain->getStressLevel() : 0.0f);
     Serial.printf("  Rumiación:   %.2f / 2.50\n", brain ? brain->getRuminationLevel() : 0.0f);
     Serial.printf("  Mult Hambre: x%.2f\n", brain ? brain->getHungerMetabolicRate() : 1.0f);
     Serial.printf("  Mult Energía:x%.2f\n", brain ? brain->getEnergyDrainMultiplier() : 1.0f);
-    
-    if (brain) {
-        Brain* b = static_cast<Brain*>(brain.get());
-        Serial.println("---------------------------------");
-        Serial.println("      IMPULSOS COGNITIVOS        ");
-        Serial.println("---------------------------------");
-        Serial.printf("  Urgencia Hambre:  %.1f %%\n", b->getHungerDrive());
-        Serial.printf("  Urgencia Social:  %.1f %%\n", b->getSocialDrive());
-        Serial.printf("  Urgencia Fatiga:  %.1f %%\n", b->getSleepDrive());
-        Serial.printf("  Nivel Malestar:   %.1f %%\n", b->getDistressDrive());
-    }
     Serial.println("=================================\n");
 }
 
@@ -110,7 +100,7 @@ void Pet::update(float dt) {
         
         if (brain) {
             PetSensoryInput deadInput = { 
-                0.0f, 0.0f, 0.0f, 0.0f, poopCount, lightsOn, false, stage, false 
+                0.0f, 0.0f, 0.0f, 0.0f, poopCount, lightsOn, false, stage, false, trust 
             };
             brain->update(dt, deadInput);
         }
@@ -177,14 +167,39 @@ void Pet::update(float dt) {
             energy = max(0.0f, energy - (energyRate * dt));
         }
 
-        float poopInterval = TOTAL_LIFESPAN_SECONDS * 0.025f;
-        if (hunger > 40.0f && poopCount < 3) {
-            poopTimer += dt;
-            if (poopTimer >= poopInterval) {
-                poopCount++;
-                poopTimer = 0.0f;
-                Serial.printf("[PET] La mascota hizo caca! Total: %d\n", poopCount);
+        // ================= MOTOR DIGESTIVO BIOLÓGICO =================
+        if (digesting) {
+            if (hunger < 20.0f) {
+                digesting = false; // El tránsito digestivo cesa con estómago vacío
+            } else {
+                digestiveTransitTimer -= dt;
+                if (digestiveTransitTimer <= 0.0f) {
+                    if (poopCount < 3) {
+                        poopCount++;
+                        poopExposureTimer = 0.0f;
+                        Serial.printf("[PET] Proceso digestivo completado. La mascota hizo caca! (Total: %d/3)\n", poopCount);
+                    }
+                    digesting = false;
+                }
             }
+        }
+
+        // ================= PENALIZACIÓN POR NEGLIGENCIA HIGIÉNICA =================
+        if (poopCount > 0) {
+            poopExposureTimer += dt;
+            // Más de 15 minutos sin limpiar: estimulación de dolor físico
+            if (poopExposureTimer > 900.0f && brain) {
+                static_cast<Brain*>(brain.get())->stimulateNeuron(3, 0.08f * dt);
+            }
+            // Más de 20 minutos: erosión de confianza y apego
+            if (poopExposureTimer > 1200.0f) {
+                trust = max(0.0f, trust - (0.2f * dt / 60.0f));
+            }
+        }
+
+        // Erosión por abandono en hambre crítica o enfermedad prolongada
+        if (hunger < 15.0f || (health < 30.0f && state == PetState::Sick)) {
+            trust = max(0.0f, trust - (0.3f * dt / 60.0f));
         }
 
         if (poopCount > 0 || hunger <= 0.0f || happiness <= 0.0f) {
@@ -198,7 +213,8 @@ void Pet::update(float dt) {
             hunger, energy, happiness, health, poopCount, lightsOn,
             (physicalTouchTimer > 0.0f),
             stage,
-            (stage == PetStage::Egg)
+            (stage == PetStage::Egg),
+            trust
         };
         brain->update(dt, input);
     }
@@ -265,15 +281,32 @@ void Pet::checkStateTransitions() {
 
 void Pet::feed() {
     if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
+
+    // Alimentar cuando tenía hambre (< 40%) construye apego
+    if (hunger < 40.0f) {
+        trust = min(100.0f, trust + 3.0f);
+    }
+
     hunger = min(100.0f, hunger + 35.0f);
     state = PetState::Eating;
     actionTimer = 2.5f;
-    
+
+    // Activación y aceleración del tránsito digestivo
+    float metabolicRate = brain ? brain->getHungerMetabolicRate() : 1.0f;
+    float baseTransit = (float)random(900, 1500) / metabolicRate;
+
+    if (digesting) {
+        digestiveTransitTimer *= 0.7f; // Aceleración del 30% por sobrealimentación
+    } else {
+        digestiveTransitTimer = baseTransit;
+        digesting = true;
+    }
+
     if (brain) {
         brain->emitReward(0.3f);
         brain->onFed();
     }
-    Serial.println("[PET] Alimentando a la mascota. Estado Eating activo (2.5s).");
+    Serial.printf("[PET] Alimentando a la mascota. Transito digestivo: %.0fs. Apego: %.1f%%\n", digestiveTransitTimer, trust);
     save();
 }
 
@@ -285,12 +318,11 @@ void Pet::pet() {
         return; 
     }
     happiness = min(100.0f, happiness + 25.0f);
+    trust = min(100.0f, trust + 0.5f); // Micro-ganancia constante de confianza
     
     if (happiness >= 35.0f) {
         state = PetState::Happy;
         actionTimer = 2.5f;
-    } else {
-        Serial.println("[PET] Acariciaste a la mascota, pero sigue triste.");
     }
 
     physicalTouchTimer = 0.3f;
@@ -301,6 +333,7 @@ void Pet::pet() {
 void Pet::heal() {
     if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     health = min(100.0f, health + 60.0f);
+    trust = min(100.0f, trust + 4.0f);
     state = PetState::Happy;
     actionTimer = 2.0f;
     if (brain) brain->emitReward(0.5f);
@@ -310,7 +343,13 @@ void Pet::heal() {
 void Pet::clean() {
     if (stage == PetStage::Dead || state == PetState::Dead) return;
     if (poopCount > 0) {
+        // Limpieza puntual (< 5 minutos) otorga bono de apego
+        if (poopExposureTimer < 300.0f) {
+            trust = min(100.0f, trust + 4.0f);
+            Serial.println("[PET] ¡Limpieza puntual! Bono de apego +4.0%.");
+        }
         poopCount = 0;
+        poopExposureTimer = 0.0f;
         poopTimer = 0.0f;
         happiness = min(100.0f, happiness + 15.0f);
         Serial.println("[PET] ¡Suelo limpiado!");
@@ -329,14 +368,17 @@ void Pet::toggleLights() {
             state = PetState::Sad;
             actionTimer = 3.0f;
             happiness = max(0.0f, happiness - 20.0f);
-            Serial.printf("[PET] ¡Luz encendida bruscamente (Energía: %.1f%% < 75%%)! Mascota despertada con estrés.\n", energy);
+            trust = max(0.0f, trust - 10.0f); // Penalización severa por despertar brusco
+            Serial.printf("[PET] ¡Despertar brusco (< 75%%)! Apego penalizado a: %.1f%%\n", trust);
             if (brain) {
                 brain->emitReward(-0.8f);
             }
         } else {
             state = PetState::Idle;
-            Serial.printf("[PET] La mascota descansó bien (Energía: %.1f%% >= 75%%). Despertó con calma.\n", energy);
         }
+    } else if (!lightsOn && energy < 40.0f) {
+        // Acostar a la mascota cuando está cansada construye apego
+        trust = min(100.0f, trust + 2.0f);
     }
     save();
 }
@@ -344,6 +386,7 @@ void Pet::toggleLights() {
 void Pet::forcePoop() {
     if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     poopCount = min(3, poopCount + 1);
+    poopExposureTimer = 0.0f;
     Serial.printf("[TEST] Caca añadida (+1). Total en suelo: %d/3\n", poopCount);
     save();
 }
@@ -427,6 +470,7 @@ bool Pet::load() {
     happiness     = doc["happiness"] | 100.0f;
     energy        = doc["energy"] | 100.0f;
     health        = doc["health"] | 100.0f;
+    trust         = doc["trust"] | 5.0f;
     poopCount     = doc["poop"] | 0;
     lightsOn      = doc["lights"] | true;
     age           = doc["age"] | 0.0f;
@@ -444,6 +488,7 @@ bool Pet::save() {
     doc["happiness"]     = happiness;
     doc["energy"]        = energy;
     doc["health"]        = health;
+    doc["trust"]         = trust;
     doc["poop"]          = poopCount;
     doc["lights"]        = lightsOn;
     doc["age"]           = age;
@@ -461,8 +506,9 @@ void Pet::reset() {
     species = "tiernito";
     stage = PetStage::Egg;
     state = PetState::Idle;
-    hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
+    hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f; trust = 5.0f;
     poopCount = 0; lightsOn = true; age = 0.0f; actionTimer = 0.0f; poopTimer = 0.0f;
+    digestiveTransitTimer = 0.0f; digesting = false; poopExposureTimer = 0.0f;
     lastTimestamp = (uint32_t)time(NULL);
     save();
 }

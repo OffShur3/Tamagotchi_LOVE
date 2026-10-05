@@ -7,6 +7,7 @@
 #include <vector>
 #include <memory>
 #include "PetDef.h"
+#include "../core/PlayerManager.h"
 
 class MessageManager {
 public:
@@ -135,46 +136,50 @@ public:
     }
 
     String getFallbackOffline(const String& mood) {
+        String owner = PlayerManager::getInstance().getOwnerName();
+
         if (mood == "happy" || mood == "LOVE") {
-            static const char* f[] = {
-                "gracias por cuidarme! te quiero mucho.", 
-                "tu compania me alegra siempre el corazon!", 
-                "siempre estoy muy contento de estar con vos!"
+            String f[] = {
+                "gracias por cuidarme " + owner + "! te quiero mucho.", 
+                "tu compania me alegra siempre el corazon, " + owner + "!", 
+                "siempre estoy contento con vos, " + owner + "!"
             };
             return sanitizeToAscii(f[random(0, 3)]);
         } else if (mood == "hungry" || mood == "eating" || mood == "HUNGRY") {
-            static const char* f[] = {
-                "mi pancita hace ruidos, tenia mucha hambre...", 
-                "que rica estaba la comida! muchas gracias.", 
-                "me llenaste la pancita, ahora estoy feliz!"
+            String f[] = {
+                "pancita con hambre... me das un pancho, " + owner + "?", 
+                "que rica comida, " + owner + "! gracias!", 
+                "me llenaste la pancita, " + owner + ", gracias!"
             };
             return sanitizeToAscii(f[random(0, 3)]);
         } else if (mood == "sick") {
-            static const char* f[] = {
-                "me duele la pancita y el cuerpo...", 
-                "me siento debil, por favor dame medicina.", 
-                "no me dejes solito sintiendome tan mal..."
+            String f[] = {
+                "me duele el cuerpo, " + owner + "...", 
+                "me siento debil, por favor cuidame, " + owner + ".", 
+                "no me dejes solito sintiendome tan mal, " + owner + "..."
             };
             return sanitizeToAscii(f[random(0, 3)]);
         } else if (mood == "dead") {
-            static const char* f[] = {
-                "por que me has descuidado tanto tiempo?", 
-                "esperaba con ilusion que volvieras a cuidarme...", 
-                "me quede sin fuerzas. siempre te extranare..."
+            String f[] = {
+                owner + ", por que me has descuidado tanto tiempo?", 
+                "esperaba que volvieras a cuidarme, " + owner + "...", 
+                "me quede sin fuerzas... te extranare, " + owner + "."
             };
             return sanitizeToAscii(f[random(0, 3)]);
         } else if (mood == "sleeping") {
-            static const char* f[] = {
-                "tengo mucho sueno... que descanses bien zzz", 
-                "buenas noches, que suenes lindo hasta manana!", 
-                "a descansar un ratito largo y calentito..."
+            String f[] = {
+                "tengo sueno, " + owner + "... que descanses bien zzz", 
+                "buenas noches, " + owner + ", hasta manana!", 
+                "a descansar un ratito, " + owner + "..."
             };
             return sanitizeToAscii(f[random(0, 3)]);
         }
-        return "explorando mi entorno con tranquilidad y calma.";
+        return "explorando mi entorno con calma, " + owner + ".";
     }
 
     String getDreamFallback(PetStage stage, bool isRestless, bool hasAffection) {
+        String owner = PlayerManager::getInstance().getOwnerName();
+
         if (isRestless) {
             static const char* nightmares[] = {
                 "mucho frio aqui... zzz",
@@ -187,13 +192,13 @@ public:
         }
 
         if (hasAffection && random(0, 100) < 50) {
-            static const char* affection[] = {
-                "manos tibias... en calma...",
-                "no estoy solito... zzz",
-                "caricias suaves... zzz",
+            String affection[] = {
+                owner + "... manos tibias... zzz",
+                "no estoy solito con " + owner + "... zzz",
+                "caricias suaves... " + owner + "... zzz",
                 "siento tu calor... mmh"
             };
-            return affection[random(0, 4)];
+            return sanitizeToAscii(affection[random(0, 4)]);
         }
 
         switch (stage) {
@@ -245,32 +250,29 @@ public:
                 unsigned char next = (unsigned char)in[i + 1];
                 i++;
                 switch (next) {
-                    case 0xA1: out += 'a'; break; // á
-                    case 0xA9: out += 'e'; break; // é
-                    case 0xAD: out += 'i'; break; // í
-                    case 0xB3: out += 'o'; break; // ó
-                    case 0xBA: out += 'u'; break; // ú
-                    case 0xBC: out += 'u'; break; // ü
-                    case 0xB1: out += 'n'; break; // ñ
-                    case 0x81: out += 'a'; break; // Á
-                    case 0x89: out += 'e'; break; // É
-                    case 0x8D: out += 'i'; break; // Í
-                    case 0x93: out += 'o'; break; // Ó
-                    case 0x9A: out += 'u'; break; // Ú
-                    case 0x91: out += 'n'; break; // Ñ
+                    case 0xA1: out += 'a'; break;
+                    case 0xA9: out += 'e'; break;
+                    case 0xAD: out += 'i'; break;
+                    case 0xB3: out += 'o'; break;
+                    case 0xBA: out += 'u'; break;
+                    case 0xBC: out += 'u'; break;
+                    case 0xB1: out += 'n'; break;
+                    case 0x81: out += 'A'; break;
+                    case 0x89: out += 'E'; break;
+                    case 0x8D: out += 'I'; break;
+                    case 0x93: out += 'O'; break;
+                    case 0x9A: out += 'U'; break;
+                    case 0x91: out += 'N'; break;
                     default: break;
                 }
             } else if (c >= 32 && c <= 126) {
-                if (c >= 'A' && c <= 'Z') {
-                    out += (char)(c + 32);
-                } else if (c != '"' && c != '\\') {
+                if (c != '"' && c != '\\') {
                     out += (char)c;
                 }
             }
         }
         out.trim();
 
-        // Límite ampliado: Permite oraciones completas acordes a las 5 líneas de MessagePopup (160x68px)
         if (out.length() > 95) {
             int cutIdx = 90;
             int lastSpace = out.lastIndexOf(' ', cutIdx);
@@ -293,7 +295,8 @@ private:
     String lastReason = "Ninguno";
 
     String buildPromptForEmotion(const String& emotion) {
-        String p = "Responde en espanol en minusculas como mascota virtual tamagotchi. Maximo 12 palabras. Estrictamente sin tildes ni enies. Sin comillas. ";
+        String owner = PlayerManager::getInstance().getOwnerName();
+        String p = "Responde en espanol en minusculas como mascota virtual tamagotchi. Maximo 12 palabras. Tu dueno se llama " + owner + ". Dirigete a el en ocasiones con carino y confianza. Estrictamente sin tildes ni enies. Sin comillas. ";
         if (emotion == "happy") p += "Di algo muy alegre y carinoso hacia tu dueno.";
         else if (emotion == "idle") p += "Di algo tranquilo, neutro y agradecido de estar con tu dueno.";
         else if (emotion == "sick") p += "Quejate con ternura de que te duele el cuerpo y necesitas medicina.";
@@ -304,7 +307,8 @@ private:
     }
 
     String buildDreamPrompt(PetStage stage, bool isRestless, bool hasAffection) {
-        String p = "Responde en espanol en minusculas como mascota sonando dormida. Maximo 5 palabras telegraficas con puntos suspensivos terminando en zzz. Estrictamente sin tildes ni enies. Sin comillas. ";
+        String owner = PlayerManager::getInstance().getOwnerName();
+        String p = "Responde en espanol en minusculas como mascota sonando dormida. Maximo 5 palabras telegraficas con puntos suspensivos terminando en zzz. Tu dueno se llama " + owner + ". En ocasiones murmura su nombre con carino entre suenos... Estrictamente sin tildes ni enies. Sin comillas. ";
         if (isRestless) {
             p += "Expresa pesadilla o malestar por hambre o frio.";
         } else if (hasAffection) {

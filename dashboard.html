@@ -13,6 +13,7 @@
             --accent-gold: #fbeeaa;
             --accent-blue: #00bcd4;
             --accent-red: #ef5350;
+            --accent-pink: #f06292;
         }
 
         * { box-sizing: border-box; }
@@ -63,7 +64,7 @@
 
         #canvas {
             background: #07040d; border: 1px solid #332014;
-            border-radius: 6px; display: block; width: 100%;
+            border-radius: 6px; display: block; width: 100%; height: 460px;
         }
 
         .sidebar { display: flex; flex-direction: column; gap: 10px; }
@@ -166,21 +167,38 @@
             height: 155px; overflow-y: auto;
         }
 
+        /* ================= TERMINAL & SINTAXIS ================= */
         #bottom-section { width: 100%; max-width: 1320px; margin-top: 12px; }
 
         #terminal {
             background: #06040a; border: 1px solid #332014;
-            height: 180px; overflow-y: auto; padding: 10px;
+            height: 200px; overflow-y: auto; padding: 10px;
             font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
             border-radius: 6px; display: flex; flex-direction: column; gap: 2px;
         }
 
-        .log-line { white-space: pre-wrap; word-break: break-word; }
-        .log-kernel { color: #81d4fa; }
-        .log-mind { color: #ce93d8; }
-        .log-thought { color: #ffe082; font-weight: bold; }
-        .log-pet { color: #a5d6a7; }
-        .log-error { color: #ef5350; }
+        .log-line {
+            white-space: pre-wrap;
+            word-break: break-word;
+            line-height: 1.4;
+            padding: 1px 0;
+        }
+        .log-kernel  { color: #81d4fa; font-weight: 500; }  /* Cyan eléctrico */
+        .log-assets  { color: #69f0ae; }                    /* Verde menta */
+        .log-pet     { color: #a5d6a7; font-weight: 500; }  /* Verde lima */
+        .log-time    { color: #b39ddb; }                    /* Lavanda */
+        .log-main    { color: #4fc3f7; font-weight: 600; }  /* Azul cielo */
+        .log-ota     { color: #ffb74d; }                    /* Naranja */
+        .log-ai      { color: #ffe082; }                    /* Dorado cálido */
+        .log-mind    { color: #ea80fc; }                    /* Magenta */
+        .log-tuner   { color: #ff80ab; font-weight: 500; }  /* Coral / Rosa */
+        .log-touch   { color: #80cbc4; }                    /* Verde agua */
+        .log-power   { color: #fff176; }                    /* Amarillo */
+        .log-cmd     { color: #fbeeaa; font-weight: bold; background: rgba(251, 238, 170, 0.08); padding: 2px 4px; border-radius: 3px; }
+        .log-error   { color: #ff5252; font-weight: bold; } /* Rojo alerta */
+        .log-divider { color: #5a3a78; font-weight: bold; } /* Púrpura tenue */
+        .log-diag    { color: #cfd8dc; }                    /* Gris claro */
+        .log-default { color: #d7ccc8; }
 
         #chat-bar { display: flex; gap: 10px; margin-top: 8px; }
         #chat-input {
@@ -207,6 +225,8 @@
         .chip-gold:hover { background: #f57f17; color: white; }
         .chip-cyan { border-color: #00bcd4; color: #80deea; }
         .chip-cyan:hover { background: #00838f; color: white; }
+        .chip-pink { border-color: #f06292; color: #f48fb1; }
+        .chip-pink:hover { background: #c2185b; color: white; }
     </style>
 </head>
 <body>
@@ -226,8 +246,8 @@
     <!-- MISION CONTROL & CONECTOMA SNN -->
     <div id="main-grid">
         <div class="panel">
-            <h3>Conectoma Neuronal Vivo (9 Nodos Conectados)</h3>
-            <canvas id="canvas" width="890" height="410"></canvas>
+            <h3>Conectoma Neuronal Vivo (10 Nodos Conectados)</h3>
+            <canvas id="canvas" width="890" height="460"></canvas>
             <div style="display:flex; justify-content:space-between; font-size:11px; margin-top:6px; color:#9e9e9e;">
                 <span>* Brillo blanco = Spike transmitido.</span>
                 <span>Spikes: <b id="lblSpikeRate" style="color:#fff;">0.0</b> Hz</span>
@@ -239,6 +259,10 @@
         <div class="sidebar">
             <div class="panel">
                 <h3>Impulsos Biológicos (Homeostasis)</h3>
+                <div class="meter-container">
+                    <div class="meter-label"><span>Apego / Confianza</span><span id="txtTrust">5%</span></div>
+                    <div class="meter-bg"><div id="barTrust" class="meter-fill" style="background:#f06292;"></div></div>
+                </div>
                 <div class="meter-container">
                     <div class="meter-label"><span>Hambre (Urgencia)</span><span id="txtHunger">0%</span></div>
                     <div class="meter-bg"><div id="barHunger" class="meter-fill" style="background:#ff7043;"></div></div>
@@ -278,7 +302,6 @@
         <div class="panel">
             <h3>Calibración Perceptiva por Dominio</h3>
 
-            <!-- Barra de Selección de Dominio -->
             <div class="domain-tabs">
                 <button class="domain-btn active" onclick="switchDomain('TAMA')">🐾 TAMA</button>
                 <button class="domain-btn" onclick="switchDomain('WORLD')">🌄 WORLD</button>
@@ -402,7 +425,6 @@
             </div>
         </div>
 
-        <!-- Columna Derecha: Objetivos, Registro C++ y Hardware -->
         <div style="display:flex; flex-direction:column; gap:12px;">
             <div class="panel">
                 <h3>Color Objetivo</h3>
@@ -493,15 +515,16 @@
 
             <div class="suite-group">
                 <span class="suite-title">🧠 SNN & Emociones:</span>
+                <span class="chip chip-pink" onclick="sendCommand('STIM 4 0.40')">♥ Impulso Mimos (S_TOUCH)</span>
+                <span class="chip chip-pink" onclick="sendCommand('THOUGHT HEART')">♥ Pensar: Amor/Apego</span>
                 <span class="chip chip-danger" onclick="sendCommand('THOUGHT STRESS')">💢 Pensar: Estrés</span>
                 <span class="chip" onclick="sendCommand('THOUGHT MED')">💊 Pensar: Medicina</span>
-                <span class="chip" onclick="sendCommand('THOUGHT FOOD')">🍎 Pensar: Comida</span>
-                <span class="chip" onclick="sendCommand('THOUGHT HEART')">♥ Pensar: Amor</span>
+                <span class="chip" onclick="sendCommand('THOUGHT FOOD')">🌭 Pensar: Pancho</span>
+                <span class="chip" onclick="sendCommand('THOUGHT PLAY')">🎮 Pensar: Juego</span>
                 <span class="chip chip-gold" onclick="sendCommand('THOUGHT NOSTALGIA')">⌛ Pensar: Nostalgia</span>
                 <span class="chip chip-cyan" onclick="sendCommand('THOUGHT ANTICIPATION')">🔔 Pensar: Espera</span>
                 <span class="chip" onclick="sendCommand('THOUGHT CAPRICE')">🌀 Pensar: Capricho</span>
                 <span class="chip chip-cyan" onclick="sendCommand('STIM 3 0.35')">⚡ Impulso Dolor (S_PAIN)</span>
-                <span class="chip chip-cyan" onclick="sendCommand('STIM 4 0.35')">⚡ Impulso Caricia (S_TOUCH)</span>
                 <span class="chip chip-gold" onclick="sendCommand('AI HAPPY')">💬 Expresar: Alegría</span>
                 <span class="chip chip-danger" onclick="sendCommand('AI SICK')">💬 Expresar: Dolor</span>
                 <span class="chip chip-danger" onclick="sendCommand('AI DEAD')">💬 Expresar: Tristeza</span>
@@ -515,10 +538,17 @@
     </div>
 
     <script>
-        let isTunerModeActive = false;
-        let port, reader, writer;
+        const canvas = document.getElementById('canvas');
+        const ctx = canvas ? canvas.getContext('2d') : null;
+        const terminal = document.getElementById('terminal');
+        const chatInput = document.getElementById('chat-input');
+        const btnSend = document.getElementById('btnSend');
+        const btnClearConsole = document.getElementById('btnClearConsole');
+        const btnConnect = document.getElementById('btnConnect');
 
-        // Estructura multidominio local
+        let isTunerModeActive = false;
+        let port = null, reader = null, writer = null;
+
         const domains = {
             "TAMA":        { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
             "WORLD":       { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
@@ -534,34 +564,66 @@
         let currentTargetName = "Cruz Botiquín";
         let pendingSend = false, isSending = false;
 
+        // 10 Neuronas: 5 Sensoriales (izq) + 5 Motoras/Emocionales (der)
         const neurons = [
-            { id: 0, name: "S_HUNGER",  x: 140, y: 55,  col: "#ff7043", v: 0, th: 1.0, spike: false },
-            { id: 1, name: "S_FATIGUE", x: 140, y: 135, col: "#42a5f5", v: 0, th: 1.0, spike: false },
-            { id: 2, name: "S_BOREDOM", x: 140, y: 215, col: "#ab47bc", v: 0, th: 1.0, spike: false },
-            { id: 3, name: "S_PAIN",    x: 140, y: 295, col: "#ef5350", v: 0, th: 1.0, spike: false },
-            { id: 4, name: "S_TOUCH",   x: 140, y: 375, col: "#26a69a", v: 0, th: 0.5, spike: false },
+            { id: 0, name: "S_HUNGER",  x: 130, y: 65,  col: "#ff7043", v: 0.0, th: 1.0, spike: false },
+            { id: 1, name: "S_FATIGUE", x: 130, y: 150, col: "#42a5f5", v: 0.0, th: 1.0, spike: false },
+            { id: 2, name: "S_BOREDOM", x: 130, y: 235, col: "#ab47bc", v: 0.0, th: 1.0, spike: false },
+            { id: 3, name: "S_PAIN",    x: 130, y: 320, col: "#ef5350", v: 0.0, th: 1.0, spike: false },
+            { id: 4, name: "S_TOUCH",   x: 130, y: 405, col: "#26a69a", v: 0.0, th: 0.5, spike: false },
 
-            { id: 5, name: "M_SLEEP",   x: 750, y: 75,  col: "#5c6bc0", v: 0, th: 2.0, spike: false },
-            { id: 6, name: "M_PLAY",    x: 750, y: 175, col: "#66bb6a", v: 0, th: 1.8, spike: false },
-            { id: 7, name: "M_SICK",    x: 750, y: 275, col: "#e53935", v: 0, th: 1.8, spike: false },
-            { id: 8, name: "M_IDLE",    x: 750, y: 375, col: "#ffa726", v: 0, th: 0.8, spike: false }
+            { id: 5, name: "M_SLEEP",   x: 760, y: 65,  col: "#5c6bc0", v: 0.0, th: 2.0, spike: false },
+            { id: 6, name: "M_PLAY",    x: 760, y: 150, col: "#66bb6a", v: 0.0, th: 1.8, spike: false },
+            { id: 7, name: "M_SICK",    x: 760, y: 235, col: "#e53935", v: 0.0, th: 1.8, spike: false },
+            { id: 8, name: "M_IDLE",    x: 760, y: 405, col: "#ffa726", v: 0.0, th: 0.8, spike: false },
+            { id: 9, name: "M_LOVE",    x: 760, y: 320, col: "#f06292", v: 0.0, th: 1.6, spike: false }
         ];
-        let synapses = [];
 
-        document.getElementById('btnConnect').onclick = async () => {
-            try {
-                port = await navigator.serial.requestPort();
-                await port.open({ baudRate: 115200 });
+        // Sinapsis base incluyendo el circuito de apego M_LOVE
+        const defaultSynapses = [
+            { pre: 1, post: 5, w: 1.2 },
+            { pre: 3, post: 7, w: 0.9 },
+            { pre: 4, post: 6, w: 0.6 },
+            { pre: 4, post: 8, w: 0.3 },
+            { pre: 2, post: 6, w: 1.0 },
+            { pre: 0, post: 8, w: 0.4 },
+            { pre: 4, post: 9, w: 0.9 },   // S_TOUCH -> M_LOVE (Apego)
+            { pre: 9, post: 8, w: 0.3 },   // M_LOVE -> M_IDLE (Serenidad)
+            { pre: 9, post: 7, w: -0.4 },  // M_LOVE -| M_SICK (Inhibe dolor)
+            { pre: 9, post: 3, w: -0.35 }, // M_LOVE -| S_PAIN (Mitiga distrés)
+            { pre: 4, post: 3, w: -0.3 },
+            { pre: 3, post: 8, w: -0.25 },
+            { pre: 5, post: 6, w: -0.3 },
+            { pre: 6, post: 5, w: -0.3 },
+            { pre: 7, post: 6, w: -0.35 },
+            { pre: 6, post: 7, w: -0.35 },
+            { pre: 5, post: 8, w: -0.3 },
+            { pre: 8, post: 5, w: -0.25 },
+            { pre: 7, post: 9, w: -0.3 },
+            { pre: 6, post: 6, w: 0.25 },
+            { pre: 5, post: 5, w: 0.3 },
+            { pre: 8, post: 8, w: 0.2 },
+            { pre: 9, post: 9, w: 0.25 }   // M_LOVE autorrecurrencia
+        ];
 
-                document.getElementById('connStatus').innerText = "CONECTADO";
-                document.getElementById('connStatus').style.color = "var(--accent-green)";
-                document.getElementById('btnConnect').style.display = "none";
+        let synapses = [...defaultSynapses];
 
-                readSerialLoop();
-            } catch (err) {
-                alert("Error al conectar WebSerial: " + err);
-            }
-        };
+        if (btnConnect) {
+            btnConnect.onclick = async () => {
+                try {
+                    port = await navigator.serial.requestPort();
+                    await port.open({ baudRate: 115200 });
+
+                    document.getElementById('connStatus').innerText = "CONECTADO";
+                    document.getElementById('connStatus').style.color = "var(--accent-green)";
+                    btnConnect.style.display = "none";
+
+                    readSerialLoop();
+                } catch (err) {
+                    alert("Error al conectar WebSerial: " + err);
+                }
+            };
+        }
 
         async function readSerialLoop() {
             const textDecoder = new TextDecoderStream();
@@ -584,8 +646,6 @@
                                                 line.includes("MODO CALIBRADOR EN EJECUCIÓN");
                     const isTunerExitConfirmation = line.includes("Reiniciando hacia TAMA") || 
                                                     line.includes("Saliendo del calibrador") ||
-                                                    line.startsWith("!BRAIN:") ||
-                                                    line.startsWith("[KERNEL]") ||
                                                     line.includes("This is 4");
 
                     if (isTunerConfirmation && !isTunerModeActive) {
@@ -612,6 +672,9 @@
                         } catch (e) {}
                     } else {
                         appendLog(line);
+                        if (line.includes("Frase seleccionada:") || line.includes("Motivo neuronal:") || line.includes("Sueno")) {
+                            updateDialogueCard(line);
+                        }
                     }
                 }
             }
@@ -628,36 +691,60 @@
             } catch (err) {}
         }
 
-        document.getElementById('btnSend').onclick = () => {
-            sendCommand(chatInput.value);
-            chatInput.value = "";
-        };
-
-        chatInput.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
+        if (btnSend && chatInput) {
+            btnSend.onclick = () => {
                 sendCommand(chatInput.value);
                 chatInput.value = "";
-            }
-        });
+            };
+            chatInput.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter') {
+                    sendCommand(chatInput.value);
+                    chatInput.value = "";
+                }
+            });
+        }
 
-        document.getElementById('btnClearConsole').onclick = () => {
-            document.getElementById('terminal').innerHTML = "";
-        };
+        if (btnClearConsole && terminal) {
+            btnClearConsole.onclick = () => {
+                terminal.innerHTML = "";
+            };
+        }
+
+        // ================= CLASIFICACIÓN DE SINTAXIS DE LOGS =================
+
+        function classifyLog(text) {
+            if (text.startsWith(">")) return "log-cmd";
+            if (text.includes("ALERT") || text.includes("Error") || text.includes("FALLECIDO") || 
+                text.includes("Fallo") || text.includes("CRÍTICO") || text.includes("Caido") || text.includes("Corrompida")) {
+                return "log-error";
+            }
+            if (text.startsWith("---") || text.startsWith("===") || text.startsWith("***")) return "log-divider";
+            if (text.startsWith("[KERNEL]") || text.startsWith("[TEST]")) return "log-kernel";
+            if (text.startsWith("[ASSETS]")) return "log-assets";
+            if (text.startsWith("[TIME]") || text.includes("NTP") || text.includes("EVENTO NTP")) return "log-time";
+            if (text.startsWith("[MAIN]")) return "log-main";
+            if (text.startsWith("[OTA]")) return "log-ota";
+            if (text.startsWith("[AI-CACHE]") || text.startsWith("[AI-TRIGGER]") || text.includes("TRIGGER") || text.startsWith("[DREAM-TRIGGER]")) return "log-ai";
+            if (text.startsWith("[PET]") || text.startsWith("[EVOLUCIÓN") || text.includes("TAMA PET DIAGNOSTICS") || 
+                text.includes("Especie:") || text.includes("Etapa:") || text.includes("Estado:") || text.includes("Hambre:") || text.includes("Salud:")) return "log-pet";
+            if (text.startsWith("[COLOR-SD]") || text.startsWith("[TUNER]")) return "log-tuner";
+            if (text.startsWith("[TOUCH]")) return "log-touch";
+            if (text.startsWith("[POWER]")) return "log-power";
+            if (text.startsWith("[MIND]") || text.startsWith("[BRAIN]")) return "log-mind";
+            if (text.includes("Urgencia") || text.includes("Mult Hambre") || text.includes("Spike Rate") || text.includes("Dopamina") || text.includes("Apego")) return "log-diag";
+            return "log-default";
+        }
 
         function appendLog(text, customStyle = "") {
-            const term = document.getElementById('terminal');
+            if (!terminal) return;
             const div = document.createElement('div');
-            div.className = "log-line";
-            if (customStyle) div.style = customStyle;
-            else if (text.startsWith("[KERNEL]") || text.startsWith("[TEST]")) div.className += " log-kernel";
-            else if (text.startsWith("[MIND]") || text.startsWith("[BRAIN]")) div.className += " log-mind";
-            else if (text.includes("TRIGGER") || text.includes("TUNER") || text.includes("COLOR-SD")) div.className += " log-thought";
-            else if (text.startsWith("[PET]") || text.startsWith("[EVOLUCIÓN")) div.className += " log-pet";
-            else if (text.includes("ALERT") || text.includes("Error") || text.includes("FALLECIDO")) div.className += " log-error";
-
+            div.className = "log-line " + classifyLog(text);
+            if (customStyle) {
+                div.style = customStyle;
+            }
             div.innerText = text;
-            term.appendChild(div);
-            term.scrollTop = term.scrollHeight;
+            terminal.appendChild(div);
+            terminal.scrollTop = terminal.scrollHeight;
         }
 
         function switchInterfaceMode(toTuner) {
@@ -716,19 +803,16 @@
         }
 
         function applyPerceptualPipeline(r, g, b, p) {
-            // 1. Ganancia Proporcional / Exposición
             const gain = Math.max(0.0, 1.0 + (p.brightness / 100.0));
             const r1 = clamp((r + p.deltaR) * gain, 0, 255);
             const g1 = clamp((g + p.deltaG) * gain, 0, 255);
             const b1 = clamp((b + p.deltaB) * gain, 0, 255);
 
-            // 2. Contraste centrado en gris medio (128)
             const cFactor = Math.max(0.0, 1.0 + (p.contrast / 100.0));
             const r2 = clamp(128.0 + (r1 - 128.0) * cFactor, 0, 255);
             const g2 = clamp(128.0 + (g1 - 128.0) * cFactor, 0, 255);
             const b2 = clamp(128.0 + (b1 - 128.0) * cFactor, 0, 255);
 
-            // 3. Saturación Perceptiva contra Luminancia Rec. 601
             const Y = (77 * r2 + 150 * g2 + 29 * b2) >> 8;
             const sFactor = Math.max(0.0, 1.0 + (p.saturation / 100.0));
 
@@ -833,10 +917,8 @@
 // Graduación: Exp=${p.brightness >= 0 ? "+" + p.brightness : p.brightness} | Con=${p.contrast >= 0 ? "+" + p.contrast : p.contrast} | Sat=${p.saturation >= 0 ? "+" + p.saturation : p.saturation}
 // Corregido:  RGB(${res.r}, ${res.g}, ${res.b}) -> ${corr565}
 
-// 1. Constante para colors.h:
 #define ${constName} ${corr565}
 
-// 2. Invocación dinámica en render:
 uint16_t c = colorTunerCorrect565(${currentDomain == "TAMA" ? "DOMAIN_TAMA" : "DOMAIN_" + currentDomain}, ${orig565});`;
 
             document.getElementById('code-output').innerText = snippet;
@@ -869,100 +951,250 @@ uint16_t c = colorTunerCorrect565(${currentDomain == "TAMA" ? "DOMAIN_TAMA" : "D
 
         // ================= CONECTOMA SNN TELEMETRÍA =================
 
+        function updateDialogueCard(logLine) {
+            const lbl = document.getElementById('lblDialogueText');
+            if (!lbl) return;
+            if (logLine.includes("Frase seleccionada:")) {
+                const parts = logLine.split("Frase seleccionada:");
+                if (parts[1]) lbl.innerText = parts[1].replace(/\"/g, '').trim();
+            } else if (logLine.includes("Sueno:") || logLine.includes("Sueno sintetizado:")) {
+                const parts = logLine.includes("Sueno sintetizado:") ? logLine.split("Sueno sintetizado:") : logLine.split("Sueno:");
+                if (parts[1]) lbl.innerText = "💤 " + parts[1].replace(/\"/g, '').trim();
+            }
+        }
+
         function updateBrainState(data) {
-            document.getElementById('lblSpikeRate').innerText = Number(data.spikeRate).toFixed(1);
-            document.getElementById('lblDopamine').innerText = Number(data.dopamine).toFixed(2);
+            if (!data) return;
+
+            if (data.spikeRate !== undefined) {
+                document.getElementById('lblSpikeRate').innerText = Number(data.spikeRate).toFixed(1);
+            }
+            if (data.dopamine !== undefined) {
+                document.getElementById('lblDopamine').innerText = Number(data.dopamine).toFixed(2);
+            }
             if (data.rumination !== undefined) {
                 document.getElementById('lblRumination').innerText = Number(data.rumination).toFixed(2);
             }
-            document.getElementById('lblThoughtName').innerText = data.thoughtName || "En calma";
-            document.getElementById('lblThoughtReason').innerText = data.thoughtReason || "Mente en reposo.";
-
-            if (data.drives) {
-                document.getElementById('barHunger').style.width = data.drives.hunger + "%";
-                document.getElementById('txtHunger').innerText = Math.round(data.drives.hunger) + "%";
-
-                document.getElementById('barSocial').style.width = data.drives.social + "%";
-                document.getElementById('txtSocial').innerText = Math.round(data.drives.social) + "%";
-
-                document.getElementById('barSleep').style.width = data.drives.sleep + "%";
-                document.getElementById('txtSleep').innerText = Math.round(data.drives.sleep) + "%";
-
-                document.getElementById('barDistress').style.width = data.drives.distress + "%";
-                document.getElementById('txtDistress').innerText = Math.round(data.drives.distress) + "%";
+            if (data.thoughtName) {
+                document.getElementById('lblThoughtName').innerText = data.thoughtName;
+            }
+            if (data.thoughtReason) {
+                document.getElementById('lblThoughtReason').innerText = data.thoughtReason;
             }
 
-            if (data.neurons) {
-                for (let i = 0; i < Math.min(neurons.length, data.neurons.length); i++) {
-                    neurons[i].v = data.neurons[i].v;
-                    neurons[i].th = data.neurons[i].th;
-                    neurons[i].spike = data.neurons[i].spk;
+            // Métrica de Apego / Confianza (Trust)
+            if (data.trust !== undefined) {
+                const trustVal = clamp(Number(data.trust), 0, 100);
+                document.getElementById('barTrust').style.width = trustVal + "%";
+                document.getElementById('txtTrust').innerText = Math.round(trustVal) + "%";
+            }
+
+            if (data.drives) {
+                if (data.drives.hunger !== undefined) {
+                    document.getElementById('barHunger').style.width = data.drives.hunger + "%";
+                    document.getElementById('txtHunger').innerText = Math.round(data.drives.hunger) + "%";
+                }
+                if (data.drives.social !== undefined) {
+                    document.getElementById('barSocial').style.width = data.drives.social + "%";
+                    document.getElementById('txtSocial').innerText = Math.round(data.drives.social) + "%";
+                }
+                if (data.drives.sleep !== undefined) {
+                    document.getElementById('barSleep').style.width = data.drives.sleep + "%";
+                    document.getElementById('txtSleep').innerText = Math.round(data.drives.sleep) + "%";
+                }
+                if (data.drives.distress !== undefined) {
+                    document.getElementById('barDistress').style.width = data.drives.distress + "%";
+                    document.getElementById('txtDistress').innerText = Math.round(data.drives.distress) + "%";
                 }
             }
 
-            if (data.synapses) {
+            if (data.neurons && Array.isArray(data.neurons)) {
+                for (let i = 0; i < Math.min(neurons.length, data.neurons.length); i++) {
+                    if (data.neurons[i].v !== undefined) neurons[i].v = Number(data.neurons[i].v);
+                    if (data.neurons[i].th !== undefined) neurons[i].th = Number(data.neurons[i].th);
+                    if (data.neurons[i].spk !== undefined) neurons[i].spike = Boolean(data.neurons[i].spk);
+                }
+            }
+
+            if (data.synapses && Array.isArray(data.synapses) && data.synapses.length > 0) {
                 synapses = data.synapses;
             }
         }
 
-        function drawCanvas() {
-            if (!isTunerModeActive) {
-                const cvs = document.getElementById('canvas');
-                const ctx = cvs.getContext('2d');
-                ctx.clearRect(0, 0, cvs.width, cvs.height);
+        // ================= MOTOR DE DIBUJO DEL CONECTOMA =================
 
-                for (let s of synapses) {
-                    let pre = neurons[s.pre];
-                    let post = neurons[s.post];
-                    if (!pre || !post) continue;
+        function renderConnectome() {
+            if (!ctx || !canvas) return;
+
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            // 1. Cuadrícula de ingeniería
+            ctx.strokeStyle = "rgba(68, 37, 22, 0.2)";
+            ctx.lineWidth = 1;
+            for (let x = 0; x < canvas.width; x += 40) {
+                ctx.beginPath(); ctx.moveTo(x, 0); ctx.lineTo(x, canvas.height); ctx.stroke();
+            }
+            for (let y = 0; y < canvas.height; y += 40) {
+                ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
+            }
+
+            // 2. Encabezados de capas
+            ctx.fillStyle = "#90a4ae";
+            ctx.font = "bold 11px monospace";
+            ctx.fillText("CORTEZA AFERENTE (SENSORIAL)", 30, 25);
+            ctx.fillText("CORTEZA EFERENTE (MOTORA & APEGO)", 620, 25);
+
+            // 3. Dibujar Sinapsis
+            for (let s of synapses) {
+                let pre = neurons[s.pre];
+                let post = neurons[s.post];
+                if (!pre || !post) continue;
+
+                let w = (typeof s.w === 'number') ? s.w : parseFloat(s.w) || 0.0;
+                let isExcitatory = w >= 0;
+
+                // Arco reentrante superior anatómico para sinapsis autorrecurrentes
+                if (s.pre === s.post) {
+                    const loopRadius = 18;
+                    const loopCenterX = pre.x + 18;
+                    const loopCenterY = pre.y - 18;
 
                     ctx.beginPath();
-                    ctx.moveTo(pre.x, pre.y);
-                    ctx.bezierCurveTo(pre.x + 220, pre.y, post.x - 220, post.y, post.x, post.y);
-                    ctx.lineWidth = Math.max(1.2, Math.abs(s.w) * 2.8);
-
-                    if (pre.spike) {
-                        ctx.strokeStyle = "#ffffff";
-                        ctx.shadowColor = "#ffffff";
-                        ctx.shadowBlur = 15;
-                    } else if (s.w < 0) {
-                        ctx.strokeStyle = `rgba(100, 180, 246, ${Math.min(0.85, Math.abs(s.w) * 0.55)})`;
-                        ctx.shadowBlur = 0;
-                    } else {
-                        ctx.strokeStyle = `rgba(180, 140, 220, ${Math.min(0.9, s.w * 0.45)})`;
-                        ctx.shadowBlur = 0;
-                    }
+                    ctx.arc(loopCenterX, loopCenterY, loopRadius, 0.35 * Math.PI, 1.85 * Math.PI, false);
+                    ctx.setLineDash([]);
+                    ctx.lineWidth = Math.max(1.2, Math.abs(w) * 2.2);
+                    ctx.strokeStyle = isExcitatory ? "rgba(255, 213, 79, 0.65)" : "rgba(128, 222, 234, 0.65)";
                     ctx.stroke();
-                    ctx.shadowBlur = 0;
 
-                    let mx = (pre.x + post.x) / 2;
-                    let my = (pre.y + post.y) / 2;
-                    ctx.fillStyle = s.w < 0 ? "#80deea" : "#ffd54f";
-                    ctx.font = "10px monospace";
-                    ctx.fillText(`w=${s.w.toFixed(2)}`, mx, my);
-                }
-
-                for (let n of neurons) {
+                    // Flecha reentrante hacia el nodo
+                    const endX = pre.x + 15;
+                    const endY = pre.y - 2;
                     ctx.beginPath();
-                    ctx.arc(n.x, n.y, n.spike ? 24 : 17, 0, Math.PI * 2);
-                    ctx.fillStyle = n.spike ? "#ffffff" : n.col;
-                    ctx.shadowColor = n.col;
-                    ctx.shadowBlur = n.spike ? 25 : 6;
+                    ctx.moveTo(endX, endY);
+                    ctx.lineTo(endX + 4, endY - 6);
+                    ctx.lineTo(endX + 7, endY);
+                    ctx.fillStyle = isExcitatory ? "#ffd54f" : "#80deea";
                     ctx.fill();
-                    ctx.shadowBlur = 0;
 
-                    ctx.fillStyle = "#ffffff";
-                    ctx.font = "bold 11px monospace";
-                    ctx.fillText(n.name, n.x - 28, n.y - 25);
+                    // Etiqueta con píldora centrada sobre el loop
+                    const tag = (w >= 0 ? "+" : "") + w.toFixed(2);
+                    ctx.fillStyle = "rgba(11, 8, 19, 0.9)";
+                    ctx.fillRect(loopCenterX - 16, loopCenterY - 18, 32, 13);
+                    ctx.strokeStyle = isExcitatory ? "rgba(255, 213, 79, 0.7)" : "rgba(128, 222, 234, 0.7)";
+                    ctx.lineWidth = 1;
+                    ctx.strokeRect(loopCenterX - 16, loopCenterY - 18, 32, 13);
 
-                    ctx.fillStyle = "#ffe082";
-                    ctx.font = "10px monospace";
-                    ctx.fillText(`V:${n.v.toFixed(2)}/${n.th.toFixed(1)}`, n.x - 25, n.y + 30);
+                    ctx.fillStyle = isExcitatory ? "#ffd54f" : "#80deea";
+                    ctx.font = "bold 9px monospace";
+                    ctx.textAlign = "center";
+                    ctx.fillText(tag, loopCenterX, loopCenterY - 8);
+                    ctx.textAlign = "start";
+                    continue;
                 }
+
+                // Curva Bézier entre nodos pre y post
+                ctx.beginPath();
+                ctx.moveTo(pre.x, pre.y);
+                ctx.bezierCurveTo(pre.x + 220, pre.y, post.x - 220, post.y, post.x, post.y);
+                ctx.lineWidth = Math.max(1.2, Math.abs(w) * 2.8);
+
+                if (pre.spike) {
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = "#ffffff";
+                    ctx.shadowColor = "#ffffff";
+                    ctx.shadowBlur = 16;
+                } else if (!isExcitatory) {
+                    ctx.setLineDash([4, 4]); // Inhibitoria: trazo discontinuo
+                    ctx.strokeStyle = `rgba(100, 180, 246, ${Math.min(0.85, Math.abs(w) * 0.65)})`;
+                    ctx.shadowBlur = 0;
+                } else {
+                    ctx.setLineDash([]);
+                    ctx.strokeStyle = `rgba(186, 104, 200, ${Math.min(0.85, w * 0.55)})`;
+                    ctx.shadowBlur = 0;
+                }
+                ctx.stroke();
+                ctx.shadowBlur = 0;
+                ctx.setLineDash([]);
+
+                // Etiqueta de peso sináptico con fondo
+                let mx = (pre.x + post.x) / 2;
+                let my = (pre.y + post.y) / 2;
+                let tag = (w >= 0 ? "+" : "") + w.toFixed(2);
+
+                ctx.fillStyle = "rgba(11, 8, 19, 0.85)";
+                ctx.fillRect(mx - 18, my - 7, 36, 14);
+                ctx.strokeStyle = isExcitatory ? "rgba(255, 213, 79, 0.6)" : "rgba(128, 222, 234, 0.6)";
+                ctx.lineWidth = 1;
+                ctx.strokeRect(mx - 18, my - 7, 36, 14);
+
+                ctx.fillStyle = isExcitatory ? "#ffd54f" : "#80deea";
+                ctx.font = "bold 9px monospace";
+                ctx.textAlign = "center";
+                ctx.fillText(tag, mx, my + 3);
+                ctx.textAlign = "start";
+            }
+
+            // 4. Dibujar Neuronas
+            for (let n of neurons) {
+                let v = (typeof n.v === 'number') ? n.v : parseFloat(n.v) || 0.0;
+                let th = (typeof n.th === 'number') ? n.th : parseFloat(n.th) || 1.0;
+                let progress = clamp(v / th, 0.0, 1.0);
+
+                // Anillo de potencial de membrana
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, 22, 0, Math.PI * 2);
+                ctx.strokeStyle = "rgba(255, 255, 255, 0.1)";
+                ctx.lineWidth = 3;
+                ctx.stroke();
+
+                if (progress > 0) {
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, 22, -Math.PI / 2, (-Math.PI / 2) + (progress * Math.PI * 2));
+                    ctx.strokeStyle = n.col;
+                    ctx.lineWidth = 3;
+                    ctx.stroke();
+                }
+
+                // Soma celular
+                ctx.beginPath();
+                ctx.arc(n.x, n.y, n.spike ? 19 : 14, 0, Math.PI * 2);
+                ctx.fillStyle = n.spike ? "#ffffff" : n.col;
+                ctx.shadowColor = n.col;
+                ctx.shadowBlur = n.spike ? 28 : 8;
+                ctx.fill();
+                ctx.shadowBlur = 0;
+
+                // Borde somático
+                ctx.strokeStyle = "#ffffff";
+                ctx.lineWidth = 1.5;
+                ctx.stroke();
+
+                // Identificador
+                ctx.fillStyle = "#ffffff";
+                ctx.font = "bold 11px monospace";
+                ctx.fillText(n.name, n.x - 28, n.y - 28);
+
+                // Potencial / Umbral
+                ctx.fillStyle = "#ffe082";
+                ctx.font = "10px monospace";
+                ctx.fillText(`V:${v.toFixed(2)}/${th.toFixed(1)}`, n.x - 28, n.y + 36);
+            }
+        }
+
+        function drawCanvas() {
+            try {
+                if (!isTunerModeActive) {
+                    renderConnectome();
+                }
+            } catch (err) {
+                console.error("Canvas draw error:", err);
             }
             requestAnimationFrame(drawCanvas);
         }
+
+        // Inicialización inmediata al cargar
         drawCanvas();
+        updateTunerUI();
     </script>
 </body>
 </html>

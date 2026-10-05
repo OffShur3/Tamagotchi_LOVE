@@ -15,10 +15,10 @@ enum ThoughtType {
     THOUGHT_MED = 5,           // Dolor / Medicina
     THOUGHT_STRESS = 6,        // Estrés agudo
     THOUGHT_CURIOUS = 7,       // Curiosidad exploratoria
-    THOUGHT_NOSTALGIA = 8,     // Ensoñación nostálgica (Reloj de bolsillo)
-    THOUGHT_DAYDREAM = 8,      // Alias para ensoñación
+    THOUGHT_NOSTALGIA = 8,     // Ensoñación nostálgica (Reloj)
+    THOUGHT_DAYDREAM = 8,
     THOUGHT_ANTICIPATION = 9,  // Espera / Anticipación de caricia
-    THOUGHT_CAPRICE = 10       // Capricho / Inquietud por monotonía
+    THOUGHT_CAPRICE = 10       // Capricho / Hastío
 };
 
 class Brain : public IBrain {
@@ -41,14 +41,14 @@ public:
     float getStressMultiplier() const override { return stressMult; }
     float getAffectionWeight() const override {
         for (const auto& syn : synapses) {
-            if (syn.preIndex == S_TOUCH && syn.postIndex == M_PLAY) {
+            if (syn.preIndex == S_TOUCH && syn.postIndex == M_LOVE) {
                 return syn.weight;
             }
         }
-        return 0.8f;
+        return 0.9f;
     }
 
-    const char* getName() const override { return "SNN Cognitive-Somatic Decoupled (v3.2)"; }
+    const char* getName() const override { return "SNN Cognitive-Attachment Decoupled (v3.3)"; }
 
     int getActiveThought() const { return (int)currentThought; }
     String getActiveThoughtName() const;
@@ -80,6 +80,7 @@ private:
     float driveSleep = 0.0f;
     float driveSocial = 0.0f;
     float driveDistress = 0.0f;
+    float lastTrust = 5.0f;
 
     ThoughtType currentThought = THOUGHT_NONE;
     String lastThoughtReason = "Mente en reposo";
@@ -98,6 +99,7 @@ private:
     float memoryRecallTimer = 0.0f;
     float nextRecallInterval = 30.0f;
 
+    // Conectoma de 10 Neuronas: 5 Sensoriales + 5 Motoras/Emocionales
     static const int S_HUNGER   = 0;
     static const int S_FATIGUE  = 1;
     static const int S_BOREDOM  = 2;
@@ -108,9 +110,10 @@ private:
     static const int M_PLAY     = 6;
     static const int M_SICK     = 7;
     static const int M_IDLE     = 8;
+    static const int M_LOVE     = 9; // 10ª Neurona: Apego Seguro / Serenidad
 
     void setupConnectome();
-    void processPlasticity(float dt);
+    void processPlasticity(float dt, float trust, PetStage stage);
     void evaluateThoughts(const PetSensoryInput& input);
     void computePsychosomaticMultipliers();
     void overflowThoughtToMotor(ThoughtType t);

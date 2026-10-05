@@ -3,7 +3,7 @@
 #include <math.h>
 
 Brain::Brain() {
-    neurons.resize(9);
+    neurons.resize(10);
     setupConnectome();
 }
 
@@ -26,10 +26,11 @@ void Brain::init() {
     energyDrainMult = 1.0f;
     stressMult = 1.0f;
     isEggStage = false;
+    lastTrust = 5.0f;
 }
 
 void Brain::setupConnectome() {
-    // 1. Umbrales y fugas calibrados: M_IDLE actúa como atractor ganador en equilibrio
+    // 1. Umbrales y fugas de 10 neuronas
     neurons[S_HUNGER].threshold  = 1.0f;  neurons[S_HUNGER].leak  = 0.5f;
     neurons[S_FATIGUE].threshold = 1.0f;  neurons[S_FATIGUE].leak = 0.5f;
     neurons[S_BOREDOM].threshold = 1.0f;  neurons[S_BOREDOM].leak = 0.5f;
@@ -38,37 +39,44 @@ void Brain::setupConnectome() {
 
     neurons[M_SLEEP].threshold   = 2.0f;  neurons[M_SLEEP].leak   = 0.5f; 
     neurons[M_PLAY].threshold    = 1.8f;  neurons[M_PLAY].leak    = 0.6f; 
-    neurons[M_SICK].threshold    = 1.8f;  neurons[M_SICK].leak    = 0.5f; // Mayor umbral para evitar falsos enfermos
-    neurons[M_IDLE].threshold    = 0.8f;  neurons[M_IDLE].leak    = 0.4f; // Atractor basal por defecto
+    neurons[M_SICK].threshold    = 1.8f;  neurons[M_SICK].leak    = 0.5f;
+    neurons[M_IDLE].threshold    = 0.8f;  neurons[M_IDLE].leak    = 0.4f;
+    neurons[M_LOVE].threshold    = 1.6f;  neurons[M_LOVE].leak    = 0.5f; // Umbral de apego sereno
 
     synapses.clear();
 
-    // 2. Proyecciones Sensoriales Excitatorias hacia la corteza motora
+    // 2. Proyecciones sensoriales
     synapses.push_back(Synapse(S_FATIGUE, M_SLEEP,  1.2f));
-    synapses.push_back(Synapse(S_PAIN,    M_SICK,   0.9f)); // Sensibilidad moderada (requiere dolor real)
-    synapses.push_back(Synapse(S_TOUCH,   M_PLAY,   0.8f)); // Plástica / Hebbiana
-    synapses.push_back(Synapse(S_TOUCH,   M_IDLE,   0.4f));
+    synapses.push_back(Synapse(S_PAIN,    M_SICK,   0.9f));
+    synapses.push_back(Synapse(S_TOUCH,   M_PLAY,   0.6f));
+    synapses.push_back(Synapse(S_TOUCH,   M_IDLE,   0.3f));
     synapses.push_back(Synapse(S_BOREDOM, M_PLAY,   1.0f));
-    synapses.push_back(Synapse(S_HUNGER,  M_IDLE,   0.5f));
+    synapses.push_back(Synapse(S_HUNGER,  M_IDLE,   0.4f));
 
-    // 3. Inhibición Cruzada Sensorial: El afecto mitiga el dolor directamente
+    // 3. Proyecciones sinápticas hacia M_LOVE (Hebbianas con apego)
+    synapses.push_back(Synapse(S_TOUCH,   M_LOVE,   0.9f));
+    synapses.push_back(Synapse(M_LOVE,    M_IDLE,   0.30f)); // Amor estabiliza la calma
+    synapses.push_back(Synapse(M_LOVE,    M_SICK,  -0.40f)); // Inhibición potente de dolor
+    synapses.push_back(Synapse(M_LOVE,    S_PAIN,  -0.35f)); // El afecto mitiga el distrés
+
+    // 4. Inhibición sensorial cruzada
     synapses.push_back(Synapse(S_TOUCH,   S_PAIN,  -0.30f));
-
-    // 4. Inhibición de Calma por Dolor Severo (Moderada para no inducir colapso)
     synapses.push_back(Synapse(S_PAIN,    M_IDLE,  -0.25f));
 
-    // 5. Inhibición Lateral Motora Recalibrada (Winner-Take-All suave: entre -0.25 y -0.40)
+    // 5. Inhibición lateral motora
     synapses.push_back(Synapse(M_SLEEP,   M_PLAY,  -0.30f));
     synapses.push_back(Synapse(M_PLAY,    M_SLEEP, -0.30f));
     synapses.push_back(Synapse(M_SICK,    M_PLAY,  -0.35f));
     synapses.push_back(Synapse(M_PLAY,    M_SICK,  -0.35f));
     synapses.push_back(Synapse(M_SLEEP,   M_IDLE,  -0.30f));
     synapses.push_back(Synapse(M_IDLE,    M_SLEEP, -0.25f));
+    synapses.push_back(Synapse(M_SICK,    M_LOVE,  -0.30f));
 
-    // 6. Inercia Emocional / Auto-recurrencia
+    // 6. Inercia emocional autorrecurrente
     synapses.push_back(Synapse(M_PLAY,    M_PLAY,   0.25f));
     synapses.push_back(Synapse(M_SLEEP,   M_SLEEP,  0.30f));
-    synapses.push_back(Synapse(M_IDLE,    M_IDLE,   0.20f)); // Refuerzo de estabilidad en calma
+    synapses.push_back(Synapse(M_IDLE,    M_IDLE,   0.20f));
+    synapses.push_back(Synapse(M_LOVE,    M_LOVE,   0.25f));
 }
 
 void Brain::emitReward(float amount) {
@@ -88,18 +96,31 @@ void Brain::onFed() {
     }
 }
 
-void Brain::processPlasticity(float dt) {
+void Brain::processPlasticity(float dt, float trust, PetStage stage) {
     float safeDt = min(dt, 0.5f);
     dopamine = 0.2f + (dopamine - 0.2f) * expf(-0.1f * safeDt);
     if (isnan(dopamine) || dopamine < 0.0f) dopamine = 0.2f;
 
+    bool isConsolidated = (stage == PetStage::Adult || stage == PetStage::Senior) && (trust >= 70.0f);
+
     for (size_t i = 0; i < synapses.size(); ++i) {
-        if (synapses[i].preIndex == S_TOUCH && synapses[i].postIndex == M_PLAY) {
-            if (neurons[S_TOUCH].didSpike && neurons[M_PLAY].didSpike) {
-                float rewardSignal = dopamine * 0.08f;
+        // Refuerzo sináptico de S_TOUCH -> M_LOVE
+        if (synapses[i].preIndex == S_TOUCH && synapses[i].postIndex == M_LOVE) {
+            if (neurons[S_TOUCH].didSpike && neurons[M_LOVE].didSpike) {
+                float rewardSignal = dopamine * 0.10f + (trust / 100.0f) * 0.06f;
                 synapses[i].reinforce(0.04f, rewardSignal);
             }
-            synapses[i].weight -= (synapses[i].weight - 0.5f) * 0.0005f * safeDt;
+
+            // Consolidación de mielinización en adultos con alto apego
+            if (isConsolidated) {
+                synapses[i].minWeight = 1.0f; // Piso sináptico consolidado
+                float decayRate = 0.00025f;   // 75% más lento
+                synapses[i].weight -= (synapses[i].weight - 1.2f) * decayRate * safeDt;
+            } else {
+                synapses[i].minWeight = -2.0f;
+                float decayRate = 0.001f;
+                synapses[i].weight -= (synapses[i].weight - 0.5f) * decayRate * safeDt;
+            }
         }
     }
 }
@@ -108,7 +129,7 @@ String Brain::getActiveThoughtName() const {
     if (isEggStage) return "Inconsciente (Huevo)";
     switch (currentThought) {
         case THOUGHT_HEART:        return "Amor / Gratitud";
-        case THOUGHT_FOOD:         return "Hambre / Apetito";
+        case THOUGHT_FOOD:         return "Pancho / Apetito";
         case THOUGHT_PLAY:         return "Juego / Social";
         case THOUGHT_SLEEP:        return "Sueno / Cansancio";
         case THOUGHT_POOP:         return "Incomodidad (Caca)";
@@ -149,10 +170,8 @@ void Brain::nudgeThought(ThoughtType t, const String& reason, float nudge) {
     if (isEggStage) return;
 
     if (currentThought == t) {
-        // En sucesión rápida sobre el mismo pensamiento, la intensidad se acumula y acelera exponencialmente
         ruminationLevel = (ruminationLevel * 1.3f) + nudge;
     } else {
-        // Cambio de pensamiento inicia en el nivel base
         currentThought = t;
         ruminationLevel = nudge;
     }
@@ -160,9 +179,8 @@ void Brain::nudgeThought(ThoughtType t, const String& reason, float nudge) {
     if (ruminationLevel > 2.5f) ruminationLevel = 2.5f;
 
     lastThoughtReason = reason + " [Rumiacion: " + String(ruminationLevel, 2) + "]";
-    forcedThoughtTimer = 3.5f; // La burbuja se hace visible de inmediato
+    forcedThoughtTimer = 3.5f;
 
-    // Desbordamiento Somático: solo por encima de 1.0f se altera el cuerpo/sprite
     if (ruminationLevel > 1.0f) {
         overflowThoughtToMotor(t);
     }
@@ -221,57 +239,55 @@ void Brain::evaluateThoughts(const PetSensoryInput& input) {
     ThoughtType newThought = THOUGHT_NONE;
     String motivo = "Mente en reposo";
 
-    // 1. Dolor agudo
     if (input.health < 25.0f || input.poopCount >= 3 || driveDistress >= 65.0f) {
         newThought = THOUGHT_STRESS;
         motivo = "Estres y malestar agudo (" + String((int)driveDistress) + "% malestar).";
     }
-    // 2. Necesidad de medicina
     else if (input.health < 45.0f || driveDistress >= 40.0f) {
         newThought = THOUGHT_MED;
         motivo = "Salud deteriorada (" + String((int)input.health) + "%). Requiere botiquin.";
     }
-    // 3. Incomodidad por suciedad
     else if (input.poopCount > 0) {
         newThought = THOUGHT_POOP;
         motivo = "Incomodidad: Hay " + String(input.poopCount) + " caca(s) en el entorno.";
     }
-    // 4. Apetito
     else if (driveHunger >= 40.0f) {
         newThought = THOUGHT_FOOD;
-        motivo = "Apetito. Impulso de hambre al " + String((int)driveHunger) + "%.";
+        motivo = "Apetito (Pancho). Impulso de hambre al " + String((int)driveHunger) + "%.";
     }
-    // 5. Cansancio con luz apagada
     else if (driveSleep >= 60.0f && !input.lightsOn) {
         newThought = THOUGHT_SLEEP;
         motivo = "Deseo de dormir. Energia baja (" + String((int)input.energy) + "%).";
     }
-    // 6. Aburrimiento
     else if (driveSocial >= 45.0f) {
         newThought = THOUGHT_PLAY;
         motivo = "Aburrimiento. Deseo social al " + String((int)driveSocial) + "%.";
     }
-    // 7. Afecto
     else if (dopamine > 0.8f) {
         newThought = THOUGHT_HEART;
         motivo = "Placer por caricia recibida (Dopamina: " + String(dopamine, 2) + ").";
     }
-    // 8. Nostalgia (Reloj): Homeostasis plena (>80%) y mente en calma
     else if (input.hunger > 80.0f && input.energy > 80.0f && input.happiness > 80.0f && input.health > 80.0f && input.poopCount == 0) {
-        newThought = THOUGHT_NOSTALGIA;
-        motivo = "Ensonacion nostálgica: Mirando las horas pasar en paz.";
+        // Nostalgia Afectiva -> Serenidad y apego
+        if (input.trust > 60.0f) {
+            newThought = THOUGHT_HEART;
+            motivo = "Serenidad y apego profundo (Apego: " + String((int)input.trust) + "%).";
+            neurons[M_LOVE].feed(0.5f);
+            neurons[M_IDLE].feed(0.3f);
+            dopamine = min(2.0f, dopamine + 0.2f);
+        } else {
+            newThought = THOUGHT_NOSTALGIA;
+            motivo = "Ensonacion nostalgica: Mirando las horas pasar en paz.";
+        }
     }
-    // 9. Anticipación: Espera atenta de contacto
     else if (timeSinceLastTouch > 90.0f && input.happiness >= 45.0f && input.health >= 50.0f) {
         newThought = THOUGHT_ANTICIPATION;
         motivo = "Anticipacion: " + String((int)timeSinceLastTouch) + "s esperando caricias.";
     }
-    // 10. Capricho / Hastío leve
     else if (input.hunger > 60.0f && input.energy > 50.0f && input.happiness < 60.0f) {
         newThought = THOUGHT_CAPRICE;
         motivo = "Capricho: Necesidades cubiertas, buscando novedad.";
     }
-    // 11. Curiosidad espontánea
     else if (random(0, 100) < 5 && currentThought == THOUGHT_NONE) {
         newThought = THOUGHT_CURIOUS;
         motivo = "Curiosidad espontanea explorando entorno.";
@@ -313,9 +329,10 @@ void Brain::computePsychosomaticMultipliers() {
     } else if (currentThought == THOUGHT_CAPRICE) {
         energyDrainMult = 1.0f + (min(ruminationLevel, 1.0f) * 0.20f);
         stressMult = 1.0f;
-    } else if (currentThought == THOUGHT_NOSTALGIA) {
+    } else if (currentThought == THOUGHT_NOSTALGIA || currentThought == THOUGHT_HEART) {
         energyDrainMult = 0.80f;
-        stressMult = 0.75f;
+        // Apego seguro mitiga estrés
+        stressMult = (lastTrust > 70.0f) ? 0.50f : 0.75f;
     } else {
         energyDrainMult = 1.0f;
         stressMult = 1.0f;
@@ -325,8 +342,8 @@ void Brain::computePsychosomaticMultipliers() {
 void Brain::update(float dt, const PetSensoryInput& input) {
     float safeDt = min(dt, 0.5f);
     isEggStage = input.isEgg;
+    lastTrust = input.trust;
 
-    // SILENCIO COGNITIVO TOTAL EN ETAPA DE HUEVO
     if (isEggStage) {
         currentThought = THOUGHT_NONE;
         ruminationLevel = 0.0f;
@@ -355,7 +372,6 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         timeSinceLastTouch += safeDt;
     }
 
-    // Decaimiento natural y orgánico de la rumiación cuando no hay nuevos impulsos
     if (forcedThoughtTimer > 0.0f) {
         forcedThoughtTimer -= safeDt;
     } else {
@@ -375,26 +391,19 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         neurons[S_TOUCH].feed(3.0f * safeDt); 
     }
 
-    // Recuerdo espontáneo
+    // Recuerdo afectivo espontáneo
     memoryRecallTimer += safeDt;
     if (memoryRecallTimer >= nextRecallInterval) {
         memoryRecallTimer = 0.0f;
         nextRecallInterval = random(30, 80); 
-        
-        float affectionWeight = 0.8f;
-        for (const auto& syn : synapses) {
-            if (syn.preIndex == S_TOUCH && syn.postIndex == M_PLAY) {
-                affectionWeight = syn.weight;
-                break;
-            }
-        }
 
-        if (affectionWeight > 1.2f && input.happiness > 60.0f && currentDecision == PetState::Idle) {
-            neurons[M_PLAY].feed(neurons[M_PLAY].threshold); 
+        if (input.trust > 60.0f && currentDecision == PetState::Idle) {
+            neurons[M_LOVE].feed(1.0f);
+            neurons[M_IDLE].feed(0.4f);
         }
     }
 
-    // Paso 1: Actualización de neuronas sensoriales (0..4)
+    // Paso 1: Neuronas sensoriales (0..4)
     for (int i = 0; i < 5; ++i) {
         if (neurons[i].update(safeDt)) {
             globalSpikeCount++;
@@ -407,8 +416,8 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         }
     }
 
-    // Paso 2: Actualización de neuronas motoras (5..8)
-    for (int i = 5; i < 9; ++i) {
+    // Paso 2: Neuronas motoras y de apego (5..9)
+    for (int i = 5; i < 10; ++i) {
         if (neurons[i].update(safeDt)) {
             globalSpikeCount++;
             for (size_t s = 0; s < synapses.size(); ++s) {
@@ -419,7 +428,7 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         }
     }
 
-    processPlasticity(safeDt);
+    processPlasticity(safeDt, input.trust, input.stage);
 
     spikeTimer += safeDt;
     if (spikeTimer >= 1.0f) {
@@ -448,7 +457,6 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         currentDecision = PetState::Idle;
     }
 
-    // Evaluación motora Winner-Take-All
     if (neurons[M_SICK].didSpike) {
         currentDecision = PetState::Sick;
         actionDurationTimer = 3.0f;
@@ -461,7 +469,12 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         return;
     }
 
-    // Desbordamiento Somático: solo si las pulsiones son críticas o la rumiación supera el umbral supra (>1.0)
+    // M_LOVE genera serenidad estable (Idle relajado, no sobreexcitado)
+    if (neurons[M_LOVE].didSpike) {
+        currentDecision = PetState::Idle;
+        return;
+    }
+
     if (input.health < 25.0f || input.poopCount >= 2 || (driveDistress >= 60.0f && ruminationLevel >= 1.0f)) {
         currentDecision = PetState::Sick;
         return;
@@ -473,7 +486,6 @@ void Brain::update(float dt, const PetSensoryInput& input) {
         return;
     }
 
-    // Pensamiento subumbral: Mantiene el sprite físico en reposo (Idle)
     currentDecision = PetState::Idle; 
 }
 
@@ -497,6 +509,7 @@ String Brain::getTelemetryJson() const {
     json += "\"hungerMult\":" + String(hungerMetabolicMult, 2) + ",";
     json += "\"energyMult\":" + String(energyDrainMult, 2) + ",";
     json += "\"stressMult\":" + String(stressMult, 2) + ",";
+    json += "\"trust\":" + String(lastTrust, 1) + ",";
     
     // Impulsos
     json += "\"drives\":{";
@@ -506,7 +519,7 @@ String Brain::getTelemetryJson() const {
     json += "\"distress\":" + String(driveDistress, 1);
     json += "},";
 
-    // Neuronas
+    // 10 Neuronas
     json += "\"neurons\":[";
     for (size_t i = 0; i < neurons.size(); ++i) {
         json += "{\"v\":" + String(neurons[i].potential, 2) + ",";

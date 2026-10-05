@@ -3,6 +3,7 @@
 #include "render/Renderer.h"
 #include "tamagotchi/Pet.h"
 #include "tamagotchi/PetScene.h"
+#include "tamagotchi/NameSelectScene.h"
 #include <Arduino_GFX_Library.h>
 #include <memory>
 
@@ -57,7 +58,7 @@ public:
         if (pet.getBrain()) static_cast<Brain*>(pet.getBrain())->nudgeThought(t, reason, nudge);
     }
 
-    uint16_t* getFramebuffer()     { return renderer.getFramebuffer(); }
+    uint16_t* getFramebuffer() { return renderer.getFramebuffer(); }
 
 private:
     Renderer renderer;
@@ -65,6 +66,7 @@ private:
 
     Pet pet;
     std::shared_ptr<PetScene> petScene = nullptr;
+    std::shared_ptr<NameSelectScene> nameSelectScene = nullptr;
 
     void handleInput();
 };

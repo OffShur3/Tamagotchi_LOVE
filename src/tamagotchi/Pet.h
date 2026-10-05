@@ -43,7 +43,7 @@ public:
         save();
     }
 
-    // --- Métodos de la suite de pruebas ---
+    // Suite de pruebas
     void forcePoop();
     void maxPoop() { poopCount = 3; poopTimer = 0.0f; save(); }
     void drainEnergy(float amount = 50.0f);
@@ -53,13 +53,13 @@ public:
     void makeHappy() { happiness = 100.0f; if (brain) brain->emitReward(1.0f); save(); }
     void godMode() {
         hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
-        poopCount = 0; state = PetState::Idle; save();
+        poopCount = 0; trust = 100.0f; state = PetState::Idle; save();
         Serial.println("[TEST] Modo Dios activado: 100% en todas las estadisticas.");
     }
     void revive() {
         state = PetState::Idle;
         health = 100.0f; energy = 100.0f; hunger = 100.0f; happiness = 100.0f;
-        poopCount = 0;
+        poopCount = 0; trust = 50.0f;
         if (stage == PetStage::Dead) stage = PetStage::Baby;
         Serial.println("[TEST] Mascota revivida con exito!");
         save();
@@ -89,6 +89,7 @@ public:
     float getHappiness() const { return happiness; }
     float getEnergy() const { return energy; }
     float getHealth() const { return health; }
+    float getTrust() const { return trust; }
     uint8_t getPoopCount() const { return poopCount; }
     bool isLightOn() const { return lightsOn; }
     uint32_t getAge() const { return (uint32_t)age; }
@@ -104,6 +105,7 @@ private:
     float happiness = 100.0f;
     float energy = 100.0f;
     float health = 100.0f;
+    float trust = 5.0f; // Apego / Confianza (0.0f a 100.0f)
 
     uint8_t poopCount = 0;
     bool lightsOn = true;
@@ -114,6 +116,11 @@ private:
     float actionTimer = 0.0f;
     float poopTimer = 0.0f;
     float autoSaveTimer = 0.0f;
+
+    // Motor Digestivo Biológico
+    float digestiveTransitTimer = 0.0f;
+    bool digesting = false;
+    float poopExposureTimer = 0.0f;
 
     std::unique_ptr<IBrain> brain;
 

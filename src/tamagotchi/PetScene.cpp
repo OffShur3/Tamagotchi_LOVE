@@ -11,6 +11,9 @@ void PetScene::enter() {
     clockWidget = std::make_shared<ClockWidget>();
     addObject(clockWidget);
 
+    gearWidget = std::make_shared<GearButtonWidget>();
+    addObject(gearWidget);
+
     statusHUD = std::make_shared<StatusHUD>(pet);
     addObject(statusHUD);
 
@@ -20,6 +23,14 @@ void PetScene::enter() {
     messagePopup = std::make_shared<MessagePopup>();
     addObject(messagePopup);
     MessageManager::getInstance().init();
+
+    configHelpModal = std::make_shared<ConfigHelpModal>();
+    configHelpModal->setOnEditNameRequested([this]() {
+        if (onEditPlayerName) {
+            onEditPlayerName();
+        }
+    });
+    addObject(configHelpModal);
 
     auto uiTex = AssetManager::getInstance().getTexture("/tama/ui/icons_ui.png");
     if (uiTex) {
@@ -75,15 +86,17 @@ void PetScene::exit() {
     btnFood = btnMed = btnClean = btnLamp = nullptr;
     for (int i = 0; i < 3; i++) poopSprites[i] = nullptr;
     clockWidget = nullptr;
+    gearWidget = nullptr;
     statusHUD = nullptr;
     thoughtBubble = nullptr;
     evolutionVortex = nullptr;
     evolutionOverlay = nullptr;
     messagePopup = nullptr;
+    configHelpModal = nullptr;
 }
 
 void PetScene::startAnimationTest() {
-    if (isEvolving) return;
+    if (isEvolving || isConfigModalActive()) return;
     availableTestAnims.clear();
 
     static const PetStage stagesToScan[] = {
@@ -161,14 +174,16 @@ void PetScene::startEvolutionSequence(PetStage oldStage) {
     showNewStage = false;
     silhouetteColorToggle = 0;
 
-    if (clockWidget)   clockWidget->visible = false;
-    if (statusHUD)     statusHUD->visible = false;
-    if (thoughtBubble) thoughtBubble->visible = false;
-    if (messagePopup)  messagePopup->visible = false;
-    if (btnFood)       btnFood->visible = false;
-    if (btnMed)        btnMed->visible = false;
-    if (btnClean)      btnClean->visible = false;
-    if (btnLamp)       btnLamp->visible = false;
+    if (configHelpModal) configHelpModal->dismiss();
+    if (clockWidget)     clockWidget->visible = false;
+    if (gearWidget)      gearWidget->visible = false;
+    if (statusHUD)       statusHUD->visible = false;
+    if (thoughtBubble)   thoughtBubble->visible = false;
+    if (messagePopup)    messagePopup->visible = false;
+    if (btnFood)         btnFood->visible = false;
+    if (btnMed)          btnMed->visible = false;
+    if (btnClean)        btnClean->visible = false;
+    if (btnLamp)         btnLamp->visible = false;
     for (int i = 0; i < 3; i++) {
         if (poopSprites[i]) poopSprites[i]->visible = false;
     }
@@ -293,6 +308,7 @@ void PetScene::processEvolutionSequence(float dt) {
         }
 
         if (clockWidget)   clockWidget->visible = true;
+        if (gearWidget)    gearWidget->visible = true;
         if (statusHUD)     statusHUD->visible = true;
         if (thoughtBubble) thoughtBubble->visible = true;
         if (btnFood)       btnFood->visible = true;
@@ -378,7 +394,6 @@ void PetScene::update(float dt) {
         }
     }
 
-    // Telemetría WebSerial en vivo cada 100 ms
     telemetryBroadcastTimer += dt;
     if (telemetryBroadcastTimer >= 0.1f) {
         telemetryBroadcastTimer = 0.0f;
@@ -387,21 +402,18 @@ void PetScene::update(float dt) {
         }
     }
 
-    // 1. Despacho de mensajes (vigilia o sueño)
+    // Consumo de mensajes con ventana de lectura ampliada a 6.0s
     if (MessageManager::getInstance().hasPendingMessage()) {
         if (messagePopup) {
             bool isDream = MessageManager::getInstance().isPendingDream();
-            messagePopup->showMessage(MessageManager::getInstance().consumeMessage(), 4.0f, isDream);
+            messagePopup->showMessage(MessageManager::getInstance().consumeMessage(), 6.0f, isDream);
         }
     }
 
-    // 2. Control de Diálogos / Sueños según estado biológico
     if (pet.getStage() != PetStage::Egg && pet.getState() != PetState::Dead) {
         if (pet.getState() == PetState::Sleeping) {
-            // SUPRESIÓN ABSOLUTA DE MONÓLOGO DESPIERTO DURANTE EL SUEÑO
             spontaneousThoughtTimer = 0.0f;
 
-            // Avance del ciclo de sueños subconscientes (cada 45-60s)
             dreamTimer += dt;
             if (dreamTimer >= nextDreamInterval) {
                 dreamTimer = 0.0f;
@@ -414,7 +426,6 @@ void PetScene::update(float dt) {
                 MessageManager::getInstance().requestDreamMessage(pet.getStage(), isRestless, hasAffection);
             }
         } else {
-            // Mascota en vigilia: resetear sueños y evaluar monólogo interior
             dreamTimer = 0.0f;
 
             spontaneousThoughtTimer += dt;
@@ -438,6 +449,7 @@ void PetScene::update(float dt) {
     }
 
     if (messagePopup) messagePopup->update(dt);
+    if (configHelpModal) configHelpModal->update(dt);
 
     updateSpriteTexture();
 
@@ -469,7 +481,7 @@ void PetScene::update(float dt) {
 }
 
 void PetScene::startMinigame() {
-    if (pet.getStage() == PetStage::Egg || pet.getState() == PetState::Sleeping || pet.getState() == PetState::Dead) return;
+    if (isConfigModalActive() || pet.getStage() == PetStage::Egg || pet.getState() == PetState::Sleeping || pet.getState() == PetState::Dead) return;
     isMinigameActive = true;
     minigameRound = 1;
     minigameScore = 0;
@@ -502,21 +514,44 @@ void PetScene::processMinigame(float dt) {
 }
 
 void PetScene::onTouchReleased() {
+    if (isConfigModalActive()) {
+        configHelpModal->onTouchReleased();
+        return;
+    }
     accumulatedStroke = 0.0f;
     prevPetTouchX = 0;
 }
 
 void PetScene::onTouch(uint16_t x, uint16_t y) {
+    // 1. Modal activo tiene prioridad absoluta
+    if (isConfigModalActive()) {
+        configHelpModal->onTouch(x, y);
+        return;
+    }
+
+    // 2. Descartar popups activos
     if (messagePopup && messagePopup->visible) {
         messagePopup->dismiss();
         return;
     }
 
+    // 3. Toque en el botón engranaje de configuración: Hitbox x: [126, 168], y: [26, 54]
+    if (x >= 126 && x <= 168 && y >= 26 && y <= 54) {
+        if (configHelpModal) {
+            configHelpModal->show("GUIA & AJUSTES");
+            accumulatedStroke = 0.0f;
+            prevPetTouchX = 0;
+            return;
+        }
+    }
+
+    // 4. Mascota fallecida
     if (pet.getState() == PetState::Dead || pet.getStage() == PetStage::Dead) {
         deathTouchTriggered = true;
         return;
     }
 
+    // 5. Cancelar showcase si está corriendo
     if (isAnimTestActive) {
         isAnimTestActive = false;
         Serial.println("[TEST-ANIMS] Showcase cancelado por toque en pantalla.");
@@ -527,6 +562,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
 
     if (isEvolving) return; 
 
+    // 6. Lámpara apagada: solo permite encender luz
     if (!pet.isLightOn()) {
         if (y >= 250 && x >= 126 && x <= 165 && btnLamp) { 
             pet.toggleLights(); 
@@ -537,6 +573,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
+    // 7. Entrada de minijuego
     if (isMinigameActive && waitingPlayerChoice) {
         int playerChoice = (x < 86) ? 0 : 1; 
         petChoice = random(0, 2); 
@@ -557,7 +594,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
-    // Barra de botones inferiores
+    // 8. Botones inferiores
     if (y >= 250) {
         accumulatedStroke = 0.0f;
         prevPetTouchX = 0;
@@ -589,7 +626,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
-    // Limpieza tocando cacas
+    // 9. Cacas en el suelo
     if (pet.getPoopCount() > 0) {
         bool touchRightPoops = (x >= 115 && x <= 170 && y >= 195 && y <= 250);
         bool touchLeftPoop   = (x >= 0 && x <= 50 && y >= 195 && y <= 245);
@@ -601,7 +638,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         }
     }
 
-    // Caricias sobre el cuerpo
+    // 10. Caricias sobre la mascota
     if (x >= 45 && x <= 125 && y >= 110 && y <= 195) {
         if (prevPetTouchX > 0) {
             int16_t dx = abs((int16_t)x - (int16_t)prevPetTouchX);

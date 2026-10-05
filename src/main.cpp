@@ -15,6 +15,7 @@
 #include "core/TamaNetworkManager.h" 
 #include "core/UpdateManager.h"
 #include "core/touch_axs5106.h"
+#include "core/PlayerManager.h"
 #include "tamagotchi/ClockWidget.h"
 #include "tamagotchi/MessageManager.h"
 #include "UI.h"
@@ -371,6 +372,9 @@ void setup() {
 
     loadColorConfigSD(bus);
 
+    // Inicialización del perfil del jugador
+    PlayerManager::getInstance().init();
+
     Preferences prefs;
     prefs.begin("tama-kernel", false); 
     debugMode = prefs.getBool("debug", false);
@@ -651,13 +655,20 @@ void loop() {
             Serial.println("  LIGHTS         : Alternar luz encendida/apagada");
             Serial.println("  STATS / INFO   : Diagnostico completo del sistema");
             Serial.println("  DEBUG          : Alternar visualizacion debug en SD");
-            Serial.println("  STIM <0..8> <V>: Estimular neurona con impulso gradual");
+            Serial.println("  STIM <0..9> <V>: Estimular neurona con impulso gradual");
             Serial.println("  THOUGHT <tipo> : Nudge a pensamiento (HEART, FOOD, NOSTALGIA...)");
             Serial.println("  POPUP <tipo>   : Forzar popup (DEATH, UPDATE, NET)");
             Serial.println("  AI <emocion>   : Disparar dialogo IA (HAPPY, SICK, DEAD...)");
             Serial.println("  RESET          : Reiniciar partida");
+            Serial.println("  RESET_PLAYER   : Reiniciar perfil del jugador y forzar Onboarding");
             Serial.println("  TUNECOLOURS   : Iniciar calibrador de color (Solo modo Debug)");
             Serial.println("==================================================");
+        }
+        else if (cmd == "RESET_PLAYER") {
+            PlayerManager::getInstance().reset();
+            Serial.println("[KERNEL] Perfil de jugador eliminado. Reiniciando placa...");
+            delay(400);
+            ESP.restart();
         }
         else if (cmd == "EVOLVE") {
             if (game) game->petEvolveNext();

@@ -9,10 +9,10 @@ class ThoughtBubble : public RenderObject {
 public:
     ThoughtBubble(Pet& petRef) : pet(petRef) {
         layer = RenderLayer::UI;
-        position = {76, 85};
+        position = {68, 78};
     }
 
-    Size2 getSize() const override { return {22, 18}; }
+    Size2 getSize() const override { return {34, 26}; }
 
     void draw(RenderContext& ctx) override {
         if (!visible || !pet.isLightOn() || pet.getState() == PetState::Dead || pet.getStage() == PetStage::Egg) return;
@@ -26,58 +26,277 @@ public:
         uint16_t cBorder = colorTunerCorrect565(DOMAIN_THOUGHT, 0x2104);
         uint16_t cBg     = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
 
-        for (int y = 0; y < 14; ++y) {
-            for (int x = 0; x < 20; ++x) {
-                if ((x == 0 || x == 19) && (y == 0 || y == 13)) continue;
-                uint16_t col = (x == 0 || x == 19 || y == 0 || y == 13) ? cBorder : cBg;
+        for (int y = 0; y < 22; ++y) {
+            for (int x = 0; x < 32; ++x) {
+                if ((x <= 1 && y <= 1) || (x >= 30 && y <= 1) ||
+                    (x <= 1 && y >= 20) || (x >= 30 && y >= 20)) {
+                    continue;
+                }
+
+                bool isBorder = (x == 0 || x == 31 || y == 0 || y == 21 ||
+                                (x <= 2 && y <= 2) || (x >= 29 && y <= 2) ||
+                                (x <= 2 && y >= 19) || (x >= 29 && y >= 19));
+
+                uint16_t col = isBorder ? cBorder : cBg;
                 ctx.drawPixel(bx + x, bobY + y, col);
             }
         }
-        ctx.drawPixel(bx + 4, bobY + 14, cBorder);
-        ctx.drawPixel(bx + 3, bobY + 15, cBorder);
 
-        drawIcon7x7(ctx, bx + 6, bobY + 3, iconType);
+        ctx.drawPixel(bx + 8,  bobY + 22, cBorder);
+        ctx.drawPixel(bx + 9,  bobY + 22, cBorder);
+        ctx.drawPixel(bx + 7,  bobY + 23, cBorder);
+        ctx.drawPixel(bx + 8,  bobY + 23, cBg);
+        ctx.drawPixel(bx + 6,  bobY + 24, cBorder);
+        ctx.drawPixel(bx + 5,  bobY + 25, cBorder);
+
+        drawIcon11x11(ctx, bx + 10, bobY + 5, iconType);
     }
 
-private:
-    Pet& pet;
+    static void drawIcon11x11Clipped(RenderContext& ctx, int16_t x, int16_t y, int type, int16_t clipYMin, int16_t clipYMax) {
+        if (y + 11 < clipYMin || y > clipYMax || type < 0 || type > 10) return;
 
-    void drawIcon7x7(RenderContext& ctx, int16_t x, int16_t y, int type) {
-        static const uint8_t iconHeart[7]      = {0x00, 0x24, 0x7E, 0x7E, 0x3C, 0x18, 0x00};
-        static const uint8_t iconFood[7]       = {0x08, 0x3C, 0x7E, 0x7E, 0x7E, 0x3C, 0x00};
-        static const uint8_t iconGame[7]       = {0x00, 0x3C, 0x7E, 0x5A, 0x7E, 0x24, 0x00};
-        static const uint8_t iconZzz[7]        = {0x7C, 0x08, 0x10, 0x7C, 0x00, 0x38, 0x38};
-        static const uint8_t iconPoop[7]       = {0x18, 0x3C, 0x7E, 0x7E, 0x7E, 0x3C, 0x00};
-        static const uint8_t iconCross[7]      = {0x18, 0x18, 0x7E, 0x7E, 0x18, 0x18, 0x00};
-        static const uint8_t iconAngry[7]      = {0x42, 0x24, 0x18, 0x7E, 0x18, 0x24, 0x42};
-        static const uint8_t iconQuest[7]      = {0x3C, 0x42, 0x04, 0x08, 0x08, 0x00, 0x08};
-        static const uint8_t iconWatch[7]      = {0x08, 0x3E, 0x49, 0x4D, 0x41, 0x3E, 0x00};
-        static const uint8_t iconAnticipate[7] = {0x08, 0x1C, 0x1C, 0x1C, 0x3E, 0x3E, 0x08};
-        static const uint8_t iconCaprice[7]    = {0x38, 0x24, 0x04, 0x18, 0x10, 0x20, 0x3C};
+        uint16_t pal[5] = {0, 0, 0, 0, 0};
 
-        const uint8_t* data = iconHeart;
-        uint16_t rawColor = 0xF800;
+        static const uint8_t rawIcons[11][121] = {
+            // 0: HEART
+            {
+                0,0,1,1,0,0,0,1,1,0,0,
+                0,1,3,3,1,0,1,1,1,1,0,
+                1,3,3,1,1,1,1,1,1,1,1,
+                1,1,1,1,1,1,1,1,1,1,1,
+                1,1,1,1,1,1,1,1,1,1,1,
+                0,1,1,1,1,1,1,1,1,1,0,
+                0,0,1,1,1,1,1,1,1,0,0,
+                0,0,0,1,1,1,1,1,0,0,0,
+                0,0,0,0,1,1,1,0,0,0,0,
+                0,0,0,0,0,1,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 1: PANCHO
+            {
+                0,0,0,0,0,0,0,0,3,3,0,
+                0,0,0,1,1,1,1,3,3,3,0,
+                0,0,1,2,2,4,4,1,3,0,0,
+                0,1,2,2,4,4,2,2,1,0,0,
+                3,1,2,4,4,2,2,2,1,0,0,
+                3,3,1,4,4,2,2,2,1,3,0,
+                0,3,1,2,2,4,4,2,1,3,3,
+                0,0,1,2,2,2,4,4,2,1,3,
+                0,0,0,1,2,2,2,2,1,0,0,
+                0,0,3,3,1,1,1,1,0,0,0,
+                0,3,3,0,0,0,0,0,0,0,0
+            },
+            // 2: GAME
+            {
+                0,1,1,1,1,1,1,1,1,1,0,
+                1,1,1,1,1,1,1,1,1,1,1,
+                1,0,2,0,1,1,1,3,1,4,1,
+                1,2,2,2,1,1,3,1,4,1,1,
+                1,0,2,0,1,1,1,1,1,1,1,
+                1,1,1,1,1,1,1,1,1,1,1,
+                1,1,1,1,1,1,1,1,1,1,1,
+                1,1,0,0,1,1,1,0,0,1,1,
+                1,0,0,0,0,1,0,0,0,0,1,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 3: SLEEP
+            {
+                0,0,1,1,1,0,0,3,3,3,0,
+                0,1,1,0,0,0,0,0,0,3,0,
+                1,1,0,0,0,0,0,0,3,0,0,
+                1,1,0,0,0,0,0,3,3,3,0,
+                1,1,0,0,0,0,0,0,0,0,0,
+                1,1,0,0,0,0,4,4,0,0,0,
+                0,1,1,0,0,0,0,4,0,0,0,
+                0,0,1,1,1,0,4,4,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 4: POOP
+            {
+                0,0,0,4,0,0,4,0,0,0,0,
+                0,0,4,0,0,4,0,0,0,0,0,
+                0,0,0,0,1,1,0,0,0,0,0,
+                0,0,0,1,2,2,1,0,0,0,0,
+                0,0,1,1,2,2,1,1,0,0,0,
+                0,1,2,2,1,1,2,2,1,0,0,
+                1,2,2,2,2,2,2,2,2,1,0,
+                1,1,3,3,3,3,3,3,1,1,0,
+                1,2,2,2,2,2,2,2,2,2,1,
+                0,1,1,1,1,1,1,1,1,1,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 5: MED
+            {
+                0,0,0,0,0,0,1,1,1,0,0,
+                0,0,0,0,0,1,3,1,1,1,0,
+                0,0,0,0,1,3,1,1,1,1,1,
+                0,0,0,1,1,1,1,1,1,1,1,
+                0,0,1,1,1,1,2,2,1,1,0,
+                0,1,1,1,1,2,2,2,2,0,0,
+                0,1,1,2,2,2,2,2,0,0,0,
+                1,2,2,2,2,2,0,0,0,0,0,
+                1,2,2,2,0,0,0,0,0,0,0,
+                0,1,1,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 6: STRESS
+            {
+                0,1,1,0,0,0,0,0,1,1,0,
+                1,2,2,1,0,0,0,1,2,2,1,
+                1,2,2,1,0,0,0,1,2,2,1,
+                0,1,1,1,1,1,1,1,1,1,0,
+                0,0,0,1,3,3,3,1,0,0,0,
+                0,0,0,1,3,3,3,1,0,0,0,
+                0,0,0,1,3,3,3,1,0,0,0,
+                0,1,1,1,1,1,1,1,1,1,0,
+                1,2,2,1,0,0,0,1,2,2,1,
+                1,2,2,1,0,0,0,1,2,2,1,
+                0,1,1,0,0,0,0,0,1,1,0
+            },
+            // 7: CURIOUS
+            {
+                0,0,1,1,1,1,1,0,0,0,0,
+                0,1,3,3,1,1,1,1,0,0,0,
+                1,3,1,0,0,0,1,1,1,0,0,
+                1,1,0,0,0,0,1,1,1,0,0,
+                0,0,0,0,0,1,1,1,0,0,0,
+                0,0,0,0,1,1,1,0,0,0,0,
+                0,0,0,1,1,1,0,0,0,0,0,
+                0,0,0,1,1,1,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,1,1,1,0,0,0,0,0,
+                0,0,0,1,1,1,0,0,0,0,0
+            },
+            // 8: NOSTALGIA
+            {
+                0,0,0,0,2,2,2,0,0,0,0,
+                0,0,0,0,1,2,1,0,0,0,0,
+                0,0,1,1,1,1,1,1,1,0,0,
+                0,1,1,3,3,3,3,3,1,1,0,
+                1,1,3,3,3,4,3,3,3,1,1,
+                1,1,3,3,3,4,3,3,3,1,1,
+                1,1,3,3,3,4,4,4,3,1,1,
+                0,1,1,3,3,3,3,3,1,1,0,
+                0,0,1,1,1,1,1,1,1,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            },
+            // 9: ANTICIPATION
+            {
+                0,0,0,0,0,2,0,0,0,0,0,
+                0,0,0,0,1,1,1,0,0,0,0,
+                0,0,0,1,1,4,1,1,0,0,0,
+                0,0,0,1,4,4,1,1,0,0,0,
+                0,0,1,1,4,1,1,1,1,0,0,
+                0,0,1,1,1,1,1,1,1,0,0,
+                0,1,1,1,1,1,1,1,1,1,0,
+                1,1,1,1,1,1,1,1,1,1,1,
+                0,2,2,2,2,2,2,2,2,2,0,
+                0,0,0,0,3,3,0,0,0,0,0,
+                0,0,0,0,3,3,0,0,0,0,0
+            },
+            // 10: CAPRICE
+            {
+                0,0,0,1,1,1,1,1,0,0,0,
+                0,0,1,1,2,2,2,1,1,0,0,
+                0,1,1,0,0,0,0,2,1,1,0,
+                1,1,0,1,1,1,0,0,1,1,0,
+                1,2,0,1,3,1,1,0,2,1,0,
+                1,2,0,1,1,1,1,0,2,1,0,
+                1,2,0,0,0,0,0,0,2,1,0,
+                0,1,1,2,2,2,2,2,1,1,0,
+                0,0,1,1,1,1,1,1,1,0,0,
+                0,0,0,0,0,0,0,0,0,0,0,
+                0,0,0,0,0,0,0,0,0,0,0
+            }
+        };
 
-        if (type == 1)      { data = iconFood;       rawColor = 0xFA60; }
-        else if (type == 2) { data = iconGame;       rawColor = 0x04DF; }
-        else if (type == 3) { data = iconZzz;        rawColor = 0x7BEF; }
-        else if (type == 4) { data = iconPoop;       rawColor = 0x8200; }
-        else if (type == 5) { data = iconCross;      rawColor = 0x07E0; }
-        else if (type == 6) { data = iconAngry;      rawColor = 0xF800; }
-        else if (type == 7) { data = iconQuest;      rawColor = 0xFEE0; }
-        else if (type == 8) { data = iconWatch;      rawColor = 0xFFE0; }
-        else if (type == 9) { data = iconAnticipate; rawColor = 0xFDE0; }
-        else if (type == 10){ data = iconCaprice;    rawColor = 0xF996; }
+        switch (type) {
+            case 0:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF800);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xA800);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                break;
+            case 1:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE40);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFA60);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF800);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFE0);
+                break;
+            case 2:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x31A6);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE79);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF800);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x07FF);
+                break;
+            case 3:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFE0);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE40);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x07FF);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x94B2);
+                break;
+            case 4:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x8200);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE40);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x4100);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x94B2);
+                break;
+            case 5:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF800);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFEE0);
+                break;
+            case 6:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF800);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x7800);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                break;
+            case 7:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFE0);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFA60);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                break;
+            case 8:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE40);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFE0);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x0000);
+                break;
+            case 9:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFDE0);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xCE40);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x2104);
+                pal[4] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                break;
+            case 10:
+                pal[1] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xF996);
+                pal[2] = colorTunerCorrect565(DOMAIN_THOUGHT, 0x89D7);
+                pal[3] = colorTunerCorrect565(DOMAIN_THOUGHT, 0xFFFF);
+                break;
+        }
 
-        uint16_t col = colorTunerCorrect565(DOMAIN_THOUGHT, rawColor);
-
-        for (int r = 0; r < 7; ++r) {
-            uint8_t bits = data[r];
-            for (int c = 0; c < 7; ++c) {
-                if (bits & (1 << (6 - c))) {
-                    ctx.drawPixel(x + c, y + r, col);
+        const uint8_t* ptr = rawIcons[type];
+        for (int r = 0; r < 11; ++r) {
+            int16_t py = y + r;
+            if (py >= clipYMin && py <= clipYMax && py >= 0 && py < ctx.height) {
+                for (int c = 0; c < 11; ++c) {
+                    int16_t px = x + c;
+                    uint8_t idx = ptr[r * 11 + c];
+                    if (idx > 0 && idx < 5 && px >= 0 && px < ctx.width) {
+                        ctx.framebuffer[py * ctx.width + px] = pal[idx];
+                    }
                 }
             }
         }
     }
+
+    static void drawIcon11x11(RenderContext& ctx, int16_t x, int16_t y, int type) {
+        drawIcon11x11Clipped(ctx, x, y, type, 0, ctx.height);
+    }
+
+private:
+    Pet& pet;
 };

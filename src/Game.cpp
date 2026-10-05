@@ -3,6 +3,7 @@
 #include "render/SceneManager.h"
 #include "assets/AssetManager.h"
 #include "core/touch_axs5106.h"
+#include "core/PlayerManager.h"
 #include <Arduino.h>
 
 Game::Game(uint16_t width, uint16_t height) 
@@ -30,19 +31,46 @@ void Game::init() {
 
     pet.init();
     petScene = std::make_shared<PetScene>(pet);
-    SceneManager::getInstance().changeScene(petScene);
+
+    // Cableado para edición de nombre desde la pestaña SIS del modal
+    petScene->setOnEditPlayerName([this]() {
+        Serial.println("[KERNEL] Solicitud de cambio de nombre recibida. Abriendo selector en modo edición...");
+        nameSelectScene = std::make_shared<NameSelectScene>([this]() {
+            Serial.println("[ONBOARDING] Nombre actualizado con éxito. Regresando a PetScene...");
+            SceneManager::getInstance().changeScene(petScene);
+            nameSelectScene = nullptr;
+        }, PlayerManager::getInstance().getOwnerName());
+
+        SceneManager::getInstance().changeScene(nameSelectScene);
+    });
+
+    // Verificación de Primer Arranque (Onboarding)
+    if (!PlayerManager::getInstance().hasProfile()) {
+        Serial.println("[KERNEL] Sin perfil previo: Iniciando Onboarding en NameSelectScene...");
+        nameSelectScene = std::make_shared<NameSelectScene>([this]() {
+            Serial.println("[ONBOARDING] Nombre confirmado. Transicionando a PetScene...");
+            SceneManager::getInstance().changeScene(petScene);
+            nameSelectScene = nullptr;
+        }, "");
+        SceneManager::getInstance().changeScene(nameSelectScene);
+    } else {
+        Serial.printf("[KERNEL] Bienvenido de nuevo, \"%s\". Iniciando mascota...\n", 
+                      PlayerManager::getInstance().getOwnerName().c_str());
+        SceneManager::getInstance().changeScene(petScene);
+    }
 }
 
 void Game::handleInput() {
     uint16_t tx = 0, ty = 0;
+    auto curScene = SceneManager::getInstance().getCurrentScene();
+
     if (touch_read(tx, ty)) {
-        if (petScene) {
-            petScene->onTouch(tx, ty);
+        if (curScene) {
+            curScene->onTouch(tx, ty);
         }
     } else {
-        // Notificar que se levantó el dedo para resetear la caricia
-        if (petScene) {
-            petScene->onTouchReleased();
+        if (curScene) {
+            curScene->onTouchReleased();
         }
     }
 }
@@ -52,15 +80,19 @@ void Game::tick() {
     float dt = (currentTime - lastFrameTime) / 1000.0f;
     lastFrameTime = currentTime;
 
-    if (dt > 0.2f) dt = 0.2f; // Protección contra picos de tiempo
+    if (dt > 0.2f) dt = 0.2f;
 
     handleInput();
 
-    pet.update(dt);
-    SceneManager::getInstance().update(dt);
+    // Solo actualizar la mascota y el ciclo noche si no estamos en el selector de nombre
+    if (!nameSelectScene) {
+        pet.update(dt);
+        renderer.setNightMode(!pet.isLightOn());
+    } else {
+        renderer.setNightMode(false);
+    }
 
-    // Conectar automáticamente la luz de la mascota al filtro nocturno del Renderer
-    renderer.setNightMode(!pet.isLightOn());
+    SceneManager::getInstance().update(dt);
 
     auto currentScene = SceneManager::getInstance().getCurrentScene();
     if (currentScene) {

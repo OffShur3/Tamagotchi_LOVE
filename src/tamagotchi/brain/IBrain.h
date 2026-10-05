@@ -13,6 +13,7 @@ struct PetSensoryInput {
     bool touched;
     PetStage stage;
     bool isEgg;
+    float trust; // Métrica de Apego / Confianza (0.0f a 100.0f)
 };
 
 class IBrain {

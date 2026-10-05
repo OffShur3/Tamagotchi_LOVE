@@ -18,6 +18,10 @@ public:
     static void drawUpdatePopup(Arduino_GFX* gfx, const char* title, const char* subtitle);
     static int getUpdatePopupClick(uint16_t tx, uint16_t ty);
 
+    // Popup de Defunción / Reinicio de Partida
+    static void drawDeathPopup(Arduino_GFX* gfx);
+    static int getDeathPopupClick(uint16_t tx, uint16_t ty);
+
     // Badge rojo de notificación táctil
     static void drawUpdateBadge(Arduino_GFX* gfx, int x, int y, int radius);
     static void drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x0, int y0, int radius);

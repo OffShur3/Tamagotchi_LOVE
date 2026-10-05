@@ -20,7 +20,7 @@ void Pet::setBrain(std::unique_ptr<IBrain> newBrain) {
     if (newBrain) {
         brain = std::move(newBrain);
         brain->init();
-        Serial.printf("[PET] ¡Transplante de cerebro exitoso! Nuevo cerebro: %s\n", brain->getName());
+        Serial.printf("[PET] Transplante de cerebro exitoso! Nuevo cerebro: %s\n", brain->getName());
     }
 }
 
@@ -78,10 +78,13 @@ void Pet::printStats() const {
     Serial.printf("  Edad:        %u segs (%.1f%% de vida)\n", (uint32_t)age, lifePercent);
     Serial.println("---------------------------------");
     Serial.printf("  CEREBRO:     %s\n", brain ? brain->getName() : "Sin Cerebro");
-    Serial.printf("  Pensamiento: %s\n", getThoughtIcon() >= 0 ? "Activo en Pantalla" : "En reposo");
+    Serial.printf("  Pensamiento: %s\n", (stage == PetStage::Egg) ? "Inconsciente (Huevo)" : (getThoughtIcon() >= 0 ? "Activo en Pantalla" : "En reposo"));
     Serial.printf("  Spike Rate:  %.2f spikes/sec (Hz)\n", brain ? brain->getSpikeRate() : 0.0f);
     Serial.printf("  Dopamina:    %.2f / 2.00\n", brain ? brain->getDopamineLevel() : 0.0f);
     Serial.printf("  Stress/Pain: %.2f\n", brain ? brain->getStressLevel() : 0.0f);
+    Serial.printf("  Rumiación:   %.2f / 2.50\n", brain ? brain->getRuminationLevel() : 0.0f);
+    Serial.printf("  Mult Hambre: x%.2f\n", brain ? brain->getHungerMetabolicRate() : 1.0f);
+    Serial.printf("  Mult Energía:x%.2f\n", brain ? brain->getEnergyDrainMultiplier() : 1.0f);
     
     if (brain) {
         Brain* b = static_cast<Brain*>(brain.get());
@@ -97,9 +100,20 @@ void Pet::printStats() const {
 }
 
 void Pet::update(float dt) {
-    if (stage == PetStage::Dead || state == PetState::Dead) {
-        stage = PetStage::Dead;
+    if (state == PetState::Dead || health <= 0.0f) {
         state = PetState::Dead;
+        health = 0.0f;
+        
+        if (stage == PetStage::Egg) {
+            stage = PetStage::Baby;
+        }
+        
+        if (brain) {
+            PetSensoryInput deadInput = { 
+                0.0f, 0.0f, 0.0f, 0.0f, poopCount, lightsOn, false, stage, false 
+            };
+            brain->update(dt, deadInput);
+        }
         return;
     }
 
@@ -117,7 +131,7 @@ void Pet::update(float dt) {
     if (actionTimer > 0.0f) {
         actionTimer -= dt;
         if (actionTimer <= 0.0f && state != PetState::Dead) {
-            state = (happiness < 25.0f || hunger < 25.0f) ? PetState::Sad : PetState::Idle;
+            state = (happiness < 20.0f || hunger < 20.0f) ? PetState::Sad : PetState::Idle;
         }
     }
 
@@ -131,7 +145,11 @@ void Pet::update(float dt) {
         float stageHungerMult = (stage == PetStage::Baby) ? 1.5f : 1.0f;
         float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.4f : 1.0f;
 
-        float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.06f)) * stageHungerMult;
+        float hungerCognitiveMult = brain ? brain->getHungerMetabolicRate() : 1.0f;
+        float energyCognitiveMult = brain ? brain->getEnergyDrainMultiplier() : 1.0f;
+        float stressCognitiveMult = brain ? brain->getStressMultiplier() : 1.0f;
+
+        float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.06f)) * stageHungerMult * hungerCognitiveMult;
         hunger = max(0.0f, hunger - (hungerRate * dt));
 
         float happinessRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.10f));
@@ -144,18 +162,18 @@ void Pet::update(float dt) {
                 if (energy >= 100.0f) {
                     energy = 100.0f;
                     state = PetState::Idle;
-                    Serial.println("[PET] Mascota recuperó el 100% de energía. Se despertó sola.");
+                    Serial.println("[PET] Mascota recupero el 100% de energia. Se desperto sola.");
                 }
             } else {
                 if (energy >= 100.0f) {
                     energy = 100.0f;
                 } else {
-                    float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.20f));
+                    float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.20f)) * energyCognitiveMult;
                     energy = max(0.0f, energy - (energyRate * dt));
                 }
             }
         } else {
-            float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult;
+            float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult * energyCognitiveMult;
             energy = max(0.0f, energy - (energyRate * dt));
         }
 
@@ -165,12 +183,12 @@ void Pet::update(float dt) {
             if (poopTimer >= poopInterval) {
                 poopCount++;
                 poopTimer = 0.0f;
-                Serial.printf("[PET] ¡La mascota hizo caca! Total: %d\n", poopCount);
+                Serial.printf("[PET] La mascota hizo caca! Total: %d\n", poopCount);
             }
         }
 
         if (poopCount > 0 || hunger <= 0.0f || happiness <= 0.0f) {
-            float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1);
+            float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1) * stressCognitiveMult;
             health = max(0.0f, health - (healthDropRate * dt));
         }
     }
@@ -178,7 +196,9 @@ void Pet::update(float dt) {
     if (brain) {
         PetSensoryInput input = {
             hunger, energy, happiness, health, poopCount, lightsOn,
-            (physicalTouchTimer > 0.0f)
+            (physicalTouchTimer > 0.0f),
+            stage,
+            (stage == PetStage::Egg)
         };
         brain->update(dt, input);
     }
@@ -224,13 +244,18 @@ void Pet::checkEvolution() {
 }
 
 void Pet::checkStateTransitions() {
-    if (stage == PetStage::Dead || state == PetState::Dead || health <= 0.0f) { 
-        stage = PetStage::Dead; 
-        state = PetState::Dead; 
+    if (health <= 0.0f) { 
+        if (state != PetState::Dead) {
+            state = PetState::Dead;
+            Serial.println("\n**************************************************");
+            Serial.println("[PET-ALERT] ¡LA MASCOTA HA FALLECIDO POR ENFERMEDAD/DOLOR!");
+            Serial.printf("[PET-ALERT] Etapa conservada: %s. Mostrando %s/dead.png\n", stageToString(stage).c_str(), stageToString(stage).c_str());
+            Serial.println("**************************************************\n");
+            save();
+        }
         return; 
     }
     
-    // Si hay una acción de interacción física deliberada en curso (comer durante 2.5s), no sobreescribir
     if (actionTimer > 0.0f) return;
 
     if (brain) {
@@ -238,16 +263,15 @@ void Pet::checkStateTransitions() {
     }
 }
 
-// SOLUCIÓN: Único disparador de Eating en el sistema
 void Pet::feed() {
     if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     hunger = min(100.0f, hunger + 35.0f);
     state = PetState::Eating;
-    actionTimer = 2.5f; // Come activamente durante 2.5 segundos
+    actionTimer = 2.5f;
     
     if (brain) {
         brain->emitReward(0.3f);
-        brain->onFed(); // Reinicia el sensor neuronal de hambre
+        brain->onFed();
     }
     Serial.println("[PET] Alimentando a la mascota. Estado Eating activo (2.5s).");
     save();
@@ -318,9 +342,9 @@ void Pet::toggleLights() {
 }
 
 void Pet::forcePoop() {
-    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
     poopCount = min(3, poopCount + 1);
-    Serial.printf("[TEST] Caca forzada. Total en suelo: %d\n", poopCount);
+    Serial.printf("[TEST] Caca añadida (+1). Total en suelo: %d/3\n", poopCount);
     save();
 }
 
@@ -332,9 +356,14 @@ void Pet::drainEnergy(float amount) {
 }
 
 void Pet::makeSick() {
-    if (stage == PetStage::Dead || state == PetState::Dead) return;
-    health = max(0.0f, health - 50.0f);
-    Serial.printf("[TEST] Salud reducida a: %.1f\n", health);
+    if (stage == PetStage::Egg || stage == PetStage::Dead || state == PetState::Dead) return;
+    health = 25.0f;
+    state = PetState::Sick;
+    actionTimer = 5.0f;
+    if (brain) {
+        static_cast<Brain*>(brain.get())->forceThought(THOUGHT_STRESS, "Enfermedad y dolor agudo inducidos");
+    }
+    Serial.printf("[TEST] Enfermedad inducida. Salud reducida a: %.1f%%\n", health);
     save();
 }
 
@@ -353,16 +382,13 @@ String Pet::getSpritePath() const {
     String target = "/tama/sprites/base/" + species + "/" + folder + "/" + anim + ".png";
     if (SD_MMC.exists(target)) return target;
 
-    String fallbackIdle = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
-    if (SD_MMC.exists(fallbackIdle)) return fallbackIdle;
-
     String tiernitoTarget = "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
     if (SD_MMC.exists(tiernitoTarget)) return tiernitoTarget;
 
-    String tiernitoIdle = "/tama/sprites/base/tiernito/" + folder + "/idle.png";
-    if (SD_MMC.exists(tiernitoIdle)) return tiernitoIdle;
+    String fallbackIdle = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
+    if (SD_MMC.exists(fallbackIdle)) return fallbackIdle;
 
-    return "/tama/sprites/base/tiernito/huevo/idle.png";
+    return "/tama/sprites/base/tiernito/bebe/idle.png";
 }
 
 std::vector<String> Pet::discoverInstalledSpecies() {
@@ -438,5 +464,38 @@ void Pet::reset() {
     hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
     poopCount = 0; lightsOn = true; age = 0.0f; actionTimer = 0.0f; poopTimer = 0.0f;
     lastTimestamp = (uint32_t)time(NULL);
+    save();
+}
+
+void Pet::evolveNextStage() {
+    if (stage == PetStage::Dead || state == PetState::Dead) return;
+    PetStage next = stage;
+    if (stage == PetStage::Egg) next = PetStage::Baby;
+    else if (stage == PetStage::Baby) next = PetStage::Child;
+    else if (stage == PetStage::Child) next = PetStage::Adult;
+    else if (stage == PetStage::Adult) next = PetStage::Senior;
+    else {
+        Serial.println("[PET] La mascota ya se encuentra en la etapa maxima (Senior).");
+        return;
+    }
+    
+    if (next == PetStage::Baby) age = TOTAL_LIFESPAN_SECONDS * EGG_RATIO + 1.0f;
+    else if (next == PetStage::Child) age = TOTAL_LIFESPAN_SECONDS * (EGG_RATIO + BABY_RATIO) + 1.0f;
+    else if (next == PetStage::Adult) age = TOTAL_LIFESPAN_SECONDS * (EGG_RATIO + BABY_RATIO + CHILD_RATIO) + 1.0f;
+    else if (next == PetStage::Senior) age = TOTAL_LIFESPAN_SECONDS + 1.0f;
+
+    stage = next;
+    Serial.printf("[TEST] Evolucion forzada a: %s (Edad: %.0f s)\n", stageToString(stage).c_str(), age);
+    save();
+}
+
+void Pet::jumpToStage(PetStage s) {
+    stage = s;
+    if (s == PetStage::Egg) age = 0.0f;
+    else if (s == PetStage::Baby) age = TOTAL_LIFESPAN_SECONDS * EGG_RATIO + 1.0f;
+    else if (s == PetStage::Child) age = TOTAL_LIFESPAN_SECONDS * (EGG_RATIO + BABY_RATIO) + 1.0f;
+    else if (s == PetStage::Adult) age = TOTAL_LIFESPAN_SECONDS * (EGG_RATIO + BABY_RATIO + CHILD_RATIO) + 1.0f;
+    else if (s == PetStage::Senior) age = TOTAL_LIFESPAN_SECONDS + 1.0f;
+    Serial.printf("[TEST] Salto directo a etapa: %s\n", stageToString(stage).c_str());
     save();
 }

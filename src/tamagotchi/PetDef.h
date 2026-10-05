@@ -1,3 +1,4 @@
+// src/tamagotchi/PetDef.h
 #pragma once
 #include <Arduino.h>
 
@@ -7,7 +8,7 @@ enum class PetStage {
     Child,     // Niño
     Adult,     // Adulto
     Senior,    // Anciano
-    Dead       // Muerto
+    Dead       // Estado terminal
 };
 
 enum class PetState {
@@ -20,7 +21,6 @@ enum class PetState {
     Dead
 };
 
-// Funciones auxiliares para mapear las carpetas físicas en la SD
 inline String stageToString(PetStage stage) {
     switch (stage) {
         case PetStage::Egg:    return "huevo";
@@ -28,9 +28,9 @@ inline String stageToString(PetStage stage) {
         case PetStage::Child:  return "child";
         case PetStage::Adult:  return "adulto";
         case PetStage::Senior: return "anciano";
-        case PetStage::Dead:   return "huevo";
+        case PetStage::Dead:   return "bebe"; // Fallback seguro
     }
-    return "huevo";
+    return "bebe";
 }
 
 inline String stateToString(PetState state) {

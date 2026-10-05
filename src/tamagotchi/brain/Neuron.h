@@ -16,19 +16,31 @@ struct Neuron {
           restPotential(0.0f), lastSpikeTime(0), didSpike(false) {}
 
     void feed(float input) {
+        if (isnan(input) || isinf(input)) return;
         potential += input;
-        if (potential > 10.0f) potential = 10.0f; // Evitar saturación
-        if (potential < -5.0f) potential = -5.0f;
+        
+        // Límite de despolarización
+        if (potential > 10.0f) potential = 10.0f;
+        
+        // PISO BIOLÓGICO ESTRICTO: Previene el abismo hiperpolarizante inalcanzable
+        if (potential < -0.4f) potential = -0.4f;
     }
 
     bool update(float dt) {
         didSpike = false;
         
-        // SOLUCIÓN MATEMÁTICA: Decaimiento exponencial incondicionalmente estable
+        // Decaimiento exponencial incondicionalmente estable hacia restPotential (0.0f)
         float safeDt = min(dt, 0.5f);
         potential = restPotential + (potential - restPotential) * expf(-leak * safeDt);
 
-        if (isnan(potential)) potential = restPotential;
+        if (isnan(potential) || isinf(potential)) {
+            potential = restPotential;
+        }
+
+        // Asegurar que la relajación nunca perfore el piso de membrana
+        if (potential < -0.4f) {
+            potential = -0.4f;
+        }
         
         if (potential >= threshold) {
             potential = restPotential;

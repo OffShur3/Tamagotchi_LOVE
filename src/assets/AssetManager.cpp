@@ -1,19 +1,37 @@
 // src/assets/AssetManager.cpp
 #include "AssetManager.h"
+#include "../ColorTuner.h"
 #include <Arduino.h>
 
-// Contexto de dibujo enriquecido con el puntero al decodificador
 struct PNGUserContext {
     uint16_t* dest_pixels;
     uint8_t* dest_alpha;
     uint16_t width;
-    PNG* png; 
+    PNG* png;
+    ColorDomain domain;
 };
+
+// Deduce el dominio de renderizado a partir del path del asset
+static ColorDomain deduceDomain(const std::string& path) {
+    if (path.find("sprites/base/") != std::string::npos) {
+        return DOMAIN_TAMA;
+    }
+    if (path.find("icons_ui.png") != std::string::npos) {
+        return DOMAIN_BUTTONS;
+    }
+    if (path.find("bg_main.png") != std::string::npos || path.find("objects_env.png") != std::string::npos) {
+        return DOMAIN_WORLD;
+    }
+    return DOMAIN_WORLD;
+}
 
 int PNGDrawCallback(PNGDRAW *pDraw) {
     PNGUserContext* ctx = (PNGUserContext*)pDraw->pUser;
     uint16_t* dest_row = ctx->dest_pixels + (pDraw->y * ctx->width);
     uint8_t* dest_alpha_row = ctx->dest_alpha + (pDraw->y * ctx->width);
+
+    ColorDomain domain = ctx->domain;
+    bool hasTuning = colorTunerHasEffect(domain);
 
     if (pDraw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA) {
         uint8_t* src = (uint8_t*)pDraw->pPixels;
@@ -24,13 +42,25 @@ int PNGDrawCallback(PNGDRAW *pDraw) {
             uint8_t a = src[3];
             src += 4;
 
-            dest_row[x] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+            if (hasTuning) {
+                dest_row[x] = colorTunerApply(domain, r, g, b);
+            } else {
+                dest_row[x] = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+            }
+
             if (ctx->dest_alpha) {
                 dest_alpha_row[x] = a;
             }
         }
     } else {
         ctx->png->getLineAsRGB565(pDraw, dest_row, PNG_RGB565_LITTLE_ENDIAN, 0);
+
+        if (hasTuning) {
+            for (int x = 0; x < pDraw->iWidth; ++x) {
+                dest_row[x] = colorTunerCorrect565(domain, dest_row[x]);
+            }
+        }
+
         if (ctx->dest_alpha) {
             memset(dest_alpha_row, 255, pDraw->iWidth);
         }
@@ -98,16 +128,15 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
 
     Serial.println("\n--------------------------------------------------");
     Serial.printf("[ASSETS] Abriendo archivo: %s\n", path.c_str());
+    Serial.printf("[ASSETS] Dominio asignado: %s\n", getColorDomainName(deduceDomain(path)));
     Serial.printf("[ASSETS] Dimensiones:      %dx%d píxeles\n", tex->width, tex->height);
     Serial.printf("[ASSETS] Memoria requerida: %u Bytes (%u KB)\n", 
                   (unsigned)(colorBytes + alphaBytes), (unsigned)((colorBytes + alphaBytes) / 1024));
-    Serial.printf("[ASSETS] Free PSRAM (User Space): %u Bytes (%u KB)\n", 
+    Serial.printf("[ASSETS] Free PSRAM:       %u Bytes (%u KB)\n", 
                   ESP.getFreePsram(), ESP.getFreePsram() / 1024);
     Serial.println("--------------------------------------------------");
 
-    // ASIGNACIÓN ESTRICTA A PSRAM. Si falla, NO usamos la SRAM (Kernel Space).
     tex->pixels = (uint16_t*)heap_caps_malloc(colorBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
-    
     if (hasAlpha) {
         tex->alpha = (uint8_t*)heap_caps_malloc(alphaBytes, MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
     } else {
@@ -116,7 +145,6 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
 
     if (!tex->pixels || (hasAlpha && !tex->alpha)) {
         Serial.printf("[ASSETS] ERROR CRÍTICO: No hay suficiente PSRAM libre para %s\n", path.c_str());
-        // Liberar lo que se haya alcanzado a pedir para no dejar memory leaks
         if (tex->pixels) heap_caps_free(tex->pixels);
         if (tex->alpha) heap_caps_free(tex->alpha);
         png->close();
@@ -128,14 +156,14 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
         memset(tex->alpha, 255, alphaBytes);
     }
 
-    PNGUserContext ctx = { tex->pixels, tex->alpha, tex->width, png };
+    PNGUserContext ctx = { tex->pixels, tex->alpha, tex->width, png, deduceDomain(path) };
     rc = png->decode(&ctx, 0);
     
     png->close();
     pngFile.close();
 
     if (rc != PNG_SUCCESS) {
-        Serial.printf("[ASSETS] Error decodificando pixeles del archivo PNG: %s\n", path.c_str());
+        Serial.printf("[ASSETS] Error decodificando píxeles del PNG: %s\n", path.c_str());
         return nullptr; 
     }
 
@@ -164,7 +192,7 @@ bool AssetManager::loadPNGDirectToBuffer(const std::string& path, uint16_t* dest
         return false;
     }
 
-    PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png };
+    PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png, deduceDomain(path) };
     rc = png->decode(&ctx, 0);
     
     png->close();

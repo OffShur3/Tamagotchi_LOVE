@@ -1,0 +1,968 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <title>TAMA // Mission Control & Perceptual Color Lab</title>
+    <style>
+        :root {
+            --bg-color: #0b0813;
+            --panel-bg: #150f22;
+            --panel-border: #442516;
+            --text-color: #f5dfbf;
+            --accent-green: #569440;
+            --accent-gold: #fbeeaa;
+            --accent-blue: #00bcd4;
+            --accent-red: #ef5350;
+        }
+
+        * { box-sizing: border-box; }
+
+        body {
+            margin: 0; padding: 10px 20px;
+            background: var(--bg-color); color: var(--text-color);
+            font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
+            display: flex; flex-direction: column; align-items: center;
+        }
+
+        #header {
+            width: 100%; max-width: 1320px;
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 8px 0; border-bottom: 2px solid var(--panel-border);
+        }
+
+        .btn {
+            background: var(--accent-green); color: white; border: none;
+            padding: 8px 16px; font-weight: bold; cursor: pointer; border-radius: 4px;
+            font-family: monospace; transition: 0.2s;
+        }
+        .btn:hover { background: #43a047; }
+        .btn-secondary { background: #37474f; }
+        .btn-secondary:hover { background: #546e7a; }
+        .btn-danger { background: #c62828; }
+        .btn-danger:hover { background: #e53935; }
+        .btn-blue { background: #00838f; }
+        .btn-blue:hover { background: #00acc1; }
+        .btn-gold { background: #b58900; }
+        .btn-gold:hover { background: #d3a000; }
+
+        .panel {
+            background: var(--panel-bg); border: 2px solid var(--panel-border);
+            border-radius: 8px; padding: 12px; box-shadow: 0 4px 10px rgba(0,0,0,0.5);
+        }
+
+        h3 {
+            margin: 0 0 8px 0; color: var(--accent-gold); font-size: 13px;
+            text-transform: uppercase; letter-spacing: 1px; border-bottom: 1px solid #332014;
+            padding-bottom: 3px;
+        }
+
+        #main-grid {
+            width: 100%; max-width: 1320px;
+            display: grid; grid-template-columns: 1fr 360px; gap: 15px; margin-top: 12px;
+        }
+
+        #canvas {
+            background: #07040d; border: 1px solid #332014;
+            border-radius: 6px; display: block; width: 100%;
+        }
+
+        .sidebar { display: flex; flex-direction: column; gap: 10px; }
+
+        .meter-container { margin-bottom: 6px; }
+        .meter-label { display: flex; justify-content: space-between; font-size: 11px; margin-bottom: 2px; }
+        .meter-bg { background: #231933; height: 9px; border-radius: 5px; overflow: hidden; }
+        .meter-fill { height: 100%; width: 0%; transition: width 0.2s ease; }
+
+        .thought-card {
+            background: #201435; border-left: 4px solid var(--accent-blue);
+            padding: 8px 10px; border-radius: 4px; margin-bottom: 8px;
+        }
+        .thought-title { font-weight: bold; color: var(--accent-blue); font-size: 12px; }
+        .thought-reason { font-size: 11px; color: #cfd8dc; margin-top: 3px; }
+
+        .dialogue-card {
+            background: #201435; border-left: 4px solid var(--accent-gold);
+            padding: 8px 10px; border-radius: 4px;
+        }
+
+        #tuner-grid {
+            width: 100%; max-width: 1320px;
+            display: none;
+            grid-template-columns: 1.2fr 0.8fr;
+            gap: 15px; margin-top: 12px;
+        }
+
+        .domain-tabs {
+            display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px;
+            background: #0c0816; padding: 6px; border-radius: 6px; border: 1px solid #332014;
+        }
+        .domain-btn {
+            background: #251936; border: 1px solid #4a3461; color: #cfd8dc;
+            padding: 6px 12px; font-size: 11px; font-weight: bold; border-radius: 4px;
+            cursor: pointer; font-family: monospace; transition: 0.15s;
+        }
+        .domain-btn:hover { background: #4a3461; color: #fff; }
+        .domain-btn.active {
+            background: var(--accent-gold); color: #150f22; border-color: var(--accent-gold);
+        }
+
+        .compare-box {
+            display: grid; grid-template-columns: 1fr 1fr;
+            height: 90px; border-radius: 6px; overflow: hidden;
+            border: 2px solid #5a3522; margin-bottom: 10px;
+        }
+        .compare-side {
+            display: flex; flex-direction: column; align-items: center; justify-content: center;
+            font-family: monospace; font-weight: bold; font-size: 12px; text-shadow: 0 0 3px #000;
+        }
+        #box-original { background: rgb(220, 20, 20); color: #fff; }
+        #box-corrected { background: rgb(220, 20, 20); color: #fff; }
+
+        .delta-card {
+            background: #1c142b; border: 1px solid #332014;
+            border-radius: 6px; padding: 6px 10px; margin-bottom: 6px;
+        }
+        .delta-head {
+            display: flex; justify-content: space-between; align-items: center; margin-bottom: 3px;
+        }
+        .delta-label { font-weight: bold; font-family: monospace; font-size: 11px; }
+
+        .slider-row { display: flex; align-items: center; gap: 8px; }
+        input[type="range"] {
+            flex-grow: 1; height: 6px; border-radius: 4px; outline: none; cursor: pointer;
+            accent-color: var(--accent-gold);
+        }
+        input[type="number"] {
+            width: 58px; background: #0b0713; border: 1px solid var(--panel-border);
+            color: #fff; padding: 2px 4px; font-family: monospace; font-weight: bold;
+            font-size: 12px; border-radius: 4px; text-align: center;
+        }
+
+        .step-btns { display: flex; gap: 3px; }
+        .step-btn {
+            background: #2a1c40; border: 1px solid #5a3a78; color: #e0e0e0;
+            padding: 2px 5px; font-size: 10px; border-radius: 3px; cursor: pointer;
+            font-family: monospace;
+        }
+        .step-btn:hover { background: #5a3a78; color: #fff; }
+        .step-btn-zero { background: #4a2828; border-color: #ef5350; }
+        .step-btn-zero:hover { background: #b71c1c; }
+
+        .target-list {
+            display: flex; flex-wrap: wrap; gap: 5px; margin-bottom: 10px;
+        }
+        .target-chip {
+            background: #251936; border: 1px solid #4a3461; color: #e0e0e0;
+            padding: 5px 8px; font-size: 11px; border-radius: 4px; cursor: pointer;
+            font-family: monospace;
+        }
+        .target-chip:hover { background: #4a3461; color: white; }
+        .target-chip.active { border-color: var(--accent-gold); background: #3b2559; }
+
+        #code-output {
+            background: #06040a; border: 1px solid #332014; border-radius: 4px;
+            padding: 10px; font-family: 'Consolas', 'Courier New', monospace;
+            font-size: 11px; color: #81d4fa; white-space: pre-wrap; word-break: break-all;
+            height: 155px; overflow-y: auto;
+        }
+
+        #bottom-section { width: 100%; max-width: 1320px; margin-top: 12px; }
+
+        #terminal {
+            background: #06040a; border: 1px solid #332014;
+            height: 180px; overflow-y: auto; padding: 10px;
+            font-family: 'Consolas', 'Courier New', monospace; font-size: 12px;
+            border-radius: 6px; display: flex; flex-direction: column; gap: 2px;
+        }
+
+        .log-line { white-space: pre-wrap; word-break: break-word; }
+        .log-kernel { color: #81d4fa; }
+        .log-mind { color: #ce93d8; }
+        .log-thought { color: #ffe082; font-weight: bold; }
+        .log-pet { color: #a5d6a7; }
+        .log-error { color: #ef5350; }
+
+        #chat-bar { display: flex; gap: 10px; margin-top: 8px; }
+        #chat-input {
+            flex-grow: 1; background: #1c132b; border: 2px solid var(--panel-border);
+            padding: 10px 14px; color: #fff; font-family: monospace; font-size: 13px;
+            border-radius: 4px;
+        }
+        #chat-input:focus { outline: none; border-color: var(--accent-gold); }
+
+        .suite-group {
+            display: flex; flex-wrap: wrap; align-items: center; gap: 5px;
+            margin-top: 6px; padding: 4px 0; border-bottom: 1px dashed #281a3d;
+        }
+        .suite-title { font-size: 11px; font-weight: bold; color: #b0bec5; width: 110px; }
+        .chip {
+            background: #251936; border: 1px solid #4a3461; color: #e0e0e0;
+            padding: 3px 8px; font-size: 10px; border-radius: 10px; cursor: pointer;
+            font-family: monospace; transition: 0.15s;
+        }
+        .chip:hover { background: #4a3461; color: white; }
+        .chip-danger { border-color: #ef5350; color: #ff8a80; }
+        .chip-danger:hover { background: #b71c1c; color: white; }
+        .chip-gold { border-color: #ffd54f; color: #fff59d; }
+        .chip-gold:hover { background: #f57f17; color: white; }
+        .chip-cyan { border-color: #00bcd4; color: #80deea; }
+        .chip-cyan:hover { background: #00838f; color: white; }
+    </style>
+</head>
+<body>
+
+    <div id="header">
+        <div>
+            <h2 id="titleHeader" style="margin:0; color:var(--accent-gold);">TAMA // MISSION CONTROL & BANCO DE COGNICIÓN</h2>
+            <span id="subtitleHeader" style="font-size:12px; color:#90a4ae;">Control de Estados Biológicos, Sprites y Estimulación SNN</span>
+        </div>
+        <div style="display:flex; align-items:center; gap:10px;">
+            <button id="btnExitTunerHeader" class="btn btn-danger" style="display:none;" onclick="exitColorTuner()">🚪 Salir al Juego (EXIT)</button>
+            <span id="connStatus" style="color:var(--accent-red); font-weight:bold; font-family:monospace;">DESCONECTADO</span>
+            <button id="btnConnect" class="btn">Conectar WebSerial</button>
+        </div>
+    </div>
+
+    <!-- MISION CONTROL & CONECTOMA SNN -->
+    <div id="main-grid">
+        <div class="panel">
+            <h3>Conectoma Neuronal Vivo (9 Nodos Conectados)</h3>
+            <canvas id="canvas" width="890" height="410"></canvas>
+            <div style="display:flex; justify-content:space-between; font-size:11px; margin-top:6px; color:#9e9e9e;">
+                <span>* Brillo blanco = Spike transmitido.</span>
+                <span>Spikes: <b id="lblSpikeRate" style="color:#fff;">0.0</b> Hz</span>
+                <span>Dopamina: <b id="lblDopamine" style="color:#ffd54f;">0.00</b></span>
+                <span>Rumiación: <b id="lblRumination" style="color:#ff8a80;">0.00</b></span>
+            </div>
+        </div>
+
+        <div class="sidebar">
+            <div class="panel">
+                <h3>Impulsos Biológicos (Homeostasis)</h3>
+                <div class="meter-container">
+                    <div class="meter-label"><span>Hambre (Urgencia)</span><span id="txtHunger">0%</span></div>
+                    <div class="meter-bg"><div id="barHunger" class="meter-fill" style="background:#ff7043;"></div></div>
+                </div>
+                <div class="meter-container">
+                    <div class="meter-label"><span>Social / Aburrimiento</span><span id="txtSocial">0%</span></div>
+                    <div class="meter-bg"><div id="barSocial" class="meter-fill" style="background:#ab47bc;"></div></div>
+                </div>
+                <div class="meter-container">
+                    <div class="meter-label"><span>Fatiga / Sueño</span><span id="txtSleep">0%</span></div>
+                    <div class="meter-bg"><div id="barSleep" class="meter-fill" style="background:#42a5f5;"></div></div>
+                </div>
+                <div class="meter-container">
+                    <div class="meter-label"><span>Malestar / Dolor</span><span id="txtDistress">0%</span></div>
+                    <div class="meter-bg"><div id="barDistress" class="meter-fill" style="background:#ef5350;"></div></div>
+                </div>
+            </div>
+
+            <div class="panel" style="flex-grow:1;">
+                <h3>Pensamiento Activo & Cognición</h3>
+                <div class="thought-card">
+                    <div class="thought-title" id="lblThoughtName">En reposo</div>
+                    <div class="thought-reason" id="lblThoughtReason">Sin pensamientos urgentes activos.</div>
+                </div>
+
+                <h3>Monólogo Interior (Expresión)</h3>
+                <div class="dialogue-card">
+                    <div style="font-size:11px; color:var(--accent-gold); font-weight:bold;">ÚLTIMA EXPRESIÓN:</div>
+                    <div id="lblDialogueText" style="font-size:11px; margin-top:3px; color:#fff;">En reposo mental.</div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- CALIBRADOR MULTIDOMINIO PERCEPTIVO -->
+    <div id="tuner-grid">
+        <div class="panel">
+            <h3>Calibración Perceptiva por Dominio</h3>
+
+            <!-- Barra de Selección de Dominio -->
+            <div class="domain-tabs">
+                <button class="domain-btn active" onclick="switchDomain('TAMA')">🐾 TAMA</button>
+                <button class="domain-btn" onclick="switchDomain('WORLD')">🌄 WORLD</button>
+                <button class="domain-btn" onclick="switchDomain('BUTTONS')">🔘 BUTTONS</button>
+                <button class="domain-btn" onclick="switchDomain('HUD')">📊 HUD</button>
+                <button class="domain-btn" onclick="switchDomain('THOUGHT')">💭 THOUGHT</button>
+                <button class="domain-btn" onclick="switchDomain('POPUP_DAY')">📜 POPUP DAY</button>
+                <button class="domain-btn" onclick="switchDomain('POPUP_DREAM')">🌙 POPUP DREAM</button>
+            </div>
+
+            <div class="compare-box">
+                <div class="compare-side" id="box-original">
+                    <span>ORIGINAL</span>
+                    <span id="txtOrigRGB">R:220 G:20 B:20</span>
+                    <span id="txtOrig565">0xDC22</span>
+                </div>
+                <div class="compare-side" id="box-corrected">
+                    <span>CORREGIDO</span>
+                    <span id="txtCorrRGB">R:220 G:20 B:20</span>
+                    <span id="txtCorr565">0xDC22</span>
+                </div>
+            </div>
+
+            <!-- Exposición / Brillo Proporcional -->
+            <div class="delta-card" style="border-color:#5c6bc0;">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#9fa8da;">☀️ EXPOSICIÓN (Ganancia Proporcional)</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('brightness', -5)">-5</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('brightness', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('brightness', 5)">+5</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderBri" min="-100" max="100" value="0" oninput="onInputProp('brightness', this.value)">
+                    <input type="number" id="numBri" min="-100" max="100" value="0" onchange="onInputProp('brightness', this.value)">
+                </div>
+            </div>
+
+            <!-- Contraste Centrado en 128 -->
+            <div class="delta-card" style="border-color:#7e57c2;">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#b39ddb;">🌓 CONTRASTE (Punto Medio 128)</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('contrast', -5)">-5</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('contrast', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('contrast', 5)">+5</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderCon" min="-100" max="100" value="0" oninput="onInputProp('contrast', this.value)">
+                    <input type="number" id="numCon" min="-100" max="100" value="0" onchange="onInputProp('contrast', this.value)">
+                </div>
+            </div>
+
+            <!-- Saturación Rec. 601 -->
+            <div class="delta-card" style="border-color:#26a69a;">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#80cbc4;">🎨 SATURACIÓN (Luminancia Perceptiva Y)</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('saturation', -5)">-5</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('saturation', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('saturation', 5)">+5</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderSat" min="-100" max="100" value="0" oninput="onInputProp('saturation', this.value)">
+                    <input type="number" id="numSat" min="-100" max="100" value="0" onchange="onInputProp('saturation', this.value)">
+                </div>
+            </div>
+
+            <!-- Ajuste Fino Canales -->
+            <div class="delta-card">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#ff5252;">Δ ROJO</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('deltaR', -2)">-2</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('deltaR', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('deltaR', 2)">+2</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderR" min="-100" max="100" value="0" oninput="onInputProp('deltaR', this.value)">
+                    <input type="number" id="numR" min="-100" max="100" value="0" onchange="onInputProp('deltaR', this.value)">
+                </div>
+            </div>
+
+            <div class="delta-card">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#69f0ae;">Δ VERDE</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('deltaG', -2)">-2</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('deltaG', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('deltaG', 2)">+2</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderG" min="-100" max="100" value="0" oninput="onInputProp('deltaG', this.value)">
+                    <input type="number" id="numG" min="-100" max="100" value="0" onchange="onInputProp('deltaG', this.value)">
+                </div>
+            </div>
+
+            <div class="delta-card">
+                <div class="delta-head">
+                    <span class="delta-label" style="color:#40c4ff;">Δ AZUL</span>
+                    <div class="step-btns">
+                        <button class="step-btn" onclick="stepProp('deltaB', -2)">-2</button>
+                        <button class="step-btn step-btn-zero" onclick="setProp('deltaB', 0)">0</button>
+                        <button class="step-btn" onclick="stepProp('deltaB', 2)">+2</button>
+                    </div>
+                </div>
+                <div class="slider-row">
+                    <input type="range" id="sliderB" min="-100" max="100" value="0" oninput="onInputProp('deltaB', this.value)">
+                    <input type="number" id="numB" min="-100" max="100" value="0" onchange="onInputProp('deltaB', this.value)">
+                </div>
+            </div>
+
+            <div style="display:flex; justify-content:space-between; margin-top:8px;">
+                <button class="btn btn-secondary" onclick="resetActiveDomain()">Reset Dominio Actual</button>
+                <button class="btn btn-gold" onclick="copySnippet()">📋 Copiar Código C++</button>
+            </div>
+        </div>
+
+        <!-- Columna Derecha: Objetivos, Registro C++ y Hardware -->
+        <div style="display:flex; flex-direction:column; gap:12px;">
+            <div class="panel">
+                <h3>Color Objetivo</h3>
+                <div class="target-list">
+                    <button class="target-chip active" onclick="selectTarget('Cruz Botiquín', 220, 20, 20, this)">Cruz Botiquín</button>
+                    <button class="target-chip" onclick="selectTarget('Fondo Stardew', 245, 223, 191, this)">Fondo Stardew</button>
+                    <button class="target-chip" onclick="selectTarget('Borde Marrón', 76, 40, 24, this)">Borde Marrón</button>
+                    <button class="target-chip" onclick="selectTarget('Bombilla', 255, 230, 30, this)">Bombilla</button>
+                    <button class="target-chip" onclick="selectTarget('Hotdog', 230, 80, 50, this)">Hotdog</button>
+                    <button class="target-chip" onclick="selectTarget('Verde Stardew', 86, 148, 64, this)">Verde Botón</button>
+                </div>
+                <div style="display:flex; gap:8px; align-items:center;">
+                    <span style="font-size:11px; font-family:monospace;">Personalizado:</span>
+                    <input type="color" id="customTargetPicker" value="#dc1414" oninput="onCustomTarget(this.value)" style="cursor:pointer; height:24px; border:none; background:none;">
+                </div>
+            </div>
+
+            <div class="panel" style="flex-grow:1;">
+                <h3>Extraíble: Fragmento C++</h3>
+                <div id="code-output">// Selecciona un objetivo para generar el código C++.</div>
+            </div>
+
+            <div class="panel">
+                <h3>Persistencia SD & Hardware ST7789</h3>
+                
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px; margin-bottom:8px;">
+                    <button class="btn btn-gold" style="font-size:11px;" onclick="saveToSD()">💾 Guardar en SD</button>
+                    <button class="btn btn-danger" style="font-size:11px;" onclick="factoryResetSD()">🔄 Restaurar Fábrica</button>
+                </div>
+
+                <div style="display:grid; grid-template-columns:1fr 1fr; gap:6px;">
+                    <button class="btn btn-blue" style="font-size:11px;" onclick="sendCommand('RGB')">MADCTL RGB (0x40)</button>
+                    <button class="btn btn-blue" style="font-size:11px;" onclick="sendCommand('BGR')">MADCTL BGR (0x48)</button>
+                    <button class="btn btn-secondary" style="font-size:11px;" onclick="sendCommand('INV ON')">INV ON (IPS)</button>
+                    <button class="btn btn-secondary" style="font-size:11px;" onclick="sendCommand('INV OFF')">INV OFF</button>
+                    <button class="btn btn-secondary" style="font-size:11px;" onclick="sendCommand('SWAP')">Swap Bytes PNG</button>
+                    <button class="btn btn-danger" style="font-size:11px;" onclick="exitColorTuner()">🚪 Salir al Juego</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- TERMINAL Y SUITE COMÚN -->
+    <div id="bottom-section" class="panel">
+        <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:4px;">
+            <h3 style="margin:0; border:none;">Consola Serial & Banco de Pruebas</h3>
+            <button id="btnClearConsole" class="btn btn-secondary" style="padding:3px 8px; font-size:11px;">Limpiar</button>
+        </div>
+        <div id="terminal"></div>
+
+        <div id="standardChips">
+            <div class="suite-group">
+                <span class="suite-title">🐣 Etapas & Vida:</span>
+                <span class="chip chip-gold" onclick="sendCommand('EVOLVE')">✨ EVOLVE</span>
+                <span class="chip" onclick="sendCommand('STAGE EGG')">Huevo</span>
+                <span class="chip" onclick="sendCommand('STAGE BABY')">Bebé</span>
+                <span class="chip" onclick="sendCommand('STAGE CHILD')">Niño</span>
+                <span class="chip" onclick="sendCommand('STAGE ADULT')">Adulto</span>
+                <span class="chip chip-danger" onclick="sendCommand('KILL')">💀 KILL</span>
+                <span class="chip chip-gold" onclick="sendCommand('REVIVE')">❤️ REVIVE</span>
+                <span class="chip" onclick="sendCommand('RESET')">🔄 RESET</span>
+            </div>
+
+            <div class="suite-group">
+                <span class="suite-title">🩸 Biología & Dolor:</span>
+                <span class="chip chip-danger" onclick="sendCommand('SICK')">🤒 SICK</span>
+                <span class="chip chip-danger" onclick="sendCommand('STARVE')">🍞 STARVE</span>
+                <span class="chip chip-danger" onclick="sendCommand('BORED')">🥱 BORED</span>
+                <span class="chip chip-danger" onclick="sendCommand('POOP')">💩 POOP (+1)</span>
+                <span class="chip" onclick="sendCommand('TIRED')">⚡ TIRED</span>
+                <span class="chip chip-gold" onclick="sendCommand('GODMODE')">⭐ GODMODE</span>
+                <span class="chip" onclick="sendCommand('FEED')">🍎 FEED</span>
+                <span class="chip" onclick="sendCommand('PET')">♥ PET</span>
+                <span class="chip" onclick="sendCommand('CLEAN')">✨ CLEAN</span>
+                <span class="chip" onclick="sendCommand('HEAL')">💊 HEAL</span>
+                <span class="chip" onclick="sendCommand('LIGHTS')">💡 LIGHTS</span>
+            </div>
+
+            <div class="suite-group">
+                <span class="suite-title">🎬 Sprites & Calibración:</span>
+                <span class="chip chip-gold" onclick="enterColorTuner()">🎨 TUNECOLOURS</span>
+                <span class="chip chip-gold" onclick="sendCommand('ANIMS')">🎞️ ANIMS</span>
+                <span class="chip chip-cyan" onclick="sendCommand('DEBUG')">🛠️ DEBUG</span>
+                <span class="chip" onclick="sendCommand('POPUP DEATH')">Popup Muerte</span>
+                <span class="chip" onclick="sendCommand('POPUP UPDATE')">Popup OTA</span>
+                <span class="chip" onclick="sendCommand('POPUP NET')">Popup WiFi</span>
+            </div>
+
+            <div class="suite-group">
+                <span class="suite-title">🧠 SNN & Emociones:</span>
+                <span class="chip chip-danger" onclick="sendCommand('THOUGHT STRESS')">💢 Pensar: Estrés</span>
+                <span class="chip" onclick="sendCommand('THOUGHT MED')">💊 Pensar: Medicina</span>
+                <span class="chip" onclick="sendCommand('THOUGHT FOOD')">🍎 Pensar: Comida</span>
+                <span class="chip" onclick="sendCommand('THOUGHT HEART')">♥ Pensar: Amor</span>
+                <span class="chip chip-gold" onclick="sendCommand('THOUGHT NOSTALGIA')">⌛ Pensar: Nostalgia</span>
+                <span class="chip chip-cyan" onclick="sendCommand('THOUGHT ANTICIPATION')">🔔 Pensar: Espera</span>
+                <span class="chip" onclick="sendCommand('THOUGHT CAPRICE')">🌀 Pensar: Capricho</span>
+                <span class="chip chip-cyan" onclick="sendCommand('STIM 3 0.35')">⚡ Impulso Dolor (S_PAIN)</span>
+                <span class="chip chip-cyan" onclick="sendCommand('STIM 4 0.35')">⚡ Impulso Caricia (S_TOUCH)</span>
+                <span class="chip chip-gold" onclick="sendCommand('AI HAPPY')">💬 Expresar: Alegría</span>
+                <span class="chip chip-danger" onclick="sendCommand('AI SICK')">💬 Expresar: Dolor</span>
+                <span class="chip chip-danger" onclick="sendCommand('AI DEAD')">💬 Expresar: Tristeza</span>
+            </div>
+        </div>
+
+        <div id="chat-bar">
+            <input type="text" id="chat-input" placeholder="Comando Serial (Ej: TUNECOLOURS, EXIT, THOUGHT NOSTALGIA, STATS)..." />
+            <button id="btnSend" class="btn">Enviar</button>
+        </div>
+    </div>
+
+    <script>
+        let isTunerModeActive = false;
+        let port, reader, writer;
+
+        // Estructura multidominio local
+        const domains = {
+            "TAMA":        { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "WORLD":       { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "BUTTONS":     { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "HUD":         { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "THOUGHT":     { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "POPUP_DAY":   { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+            "POPUP_DREAM": { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 }
+        };
+
+        let currentDomain = "TAMA";
+        let baseR = 220, baseG = 20, baseB = 20;
+        let currentTargetName = "Cruz Botiquín";
+        let pendingSend = false, isSending = false;
+
+        const neurons = [
+            { id: 0, name: "S_HUNGER",  x: 140, y: 55,  col: "#ff7043", v: 0, th: 1.0, spike: false },
+            { id: 1, name: "S_FATIGUE", x: 140, y: 135, col: "#42a5f5", v: 0, th: 1.0, spike: false },
+            { id: 2, name: "S_BOREDOM", x: 140, y: 215, col: "#ab47bc", v: 0, th: 1.0, spike: false },
+            { id: 3, name: "S_PAIN",    x: 140, y: 295, col: "#ef5350", v: 0, th: 1.0, spike: false },
+            { id: 4, name: "S_TOUCH",   x: 140, y: 375, col: "#26a69a", v: 0, th: 0.5, spike: false },
+
+            { id: 5, name: "M_SLEEP",   x: 750, y: 75,  col: "#5c6bc0", v: 0, th: 2.0, spike: false },
+            { id: 6, name: "M_PLAY",    x: 750, y: 175, col: "#66bb6a", v: 0, th: 1.8, spike: false },
+            { id: 7, name: "M_SICK",    x: 750, y: 275, col: "#e53935", v: 0, th: 1.8, spike: false },
+            { id: 8, name: "M_IDLE",    x: 750, y: 375, col: "#ffa726", v: 0, th: 0.8, spike: false }
+        ];
+        let synapses = [];
+
+        document.getElementById('btnConnect').onclick = async () => {
+            try {
+                port = await navigator.serial.requestPort();
+                await port.open({ baudRate: 115200 });
+
+                document.getElementById('connStatus').innerText = "CONECTADO";
+                document.getElementById('connStatus').style.color = "var(--accent-green)";
+                document.getElementById('btnConnect').style.display = "none";
+
+                readSerialLoop();
+            } catch (err) {
+                alert("Error al conectar WebSerial: " + err);
+            }
+        };
+
+        async function readSerialLoop() {
+            const textDecoder = new TextDecoderStream();
+            port.readable.pipeTo(textDecoder.writable);
+            reader = textDecoder.readable.getReader();
+            let buffer = "";
+
+            while (true) {
+                const { value, done } = await reader.read();
+                if (done) break;
+                buffer += value;
+                let lines = buffer.split("\n");
+                buffer = lines.pop();
+
+                for (let line of lines) {
+                    line = line.trim();
+                    if (!line) continue;
+
+                    const isTunerConfirmation = line.includes("TAMA COLOR TUNER") || 
+                                                line.includes("MODO CALIBRADOR EN EJECUCIÓN");
+                    const isTunerExitConfirmation = line.includes("Reiniciando hacia TAMA") || 
+                                                    line.includes("Saliendo del calibrador") ||
+                                                    line.startsWith("!BRAIN:") ||
+                                                    line.startsWith("[KERNEL]") ||
+                                                    line.includes("This is 4");
+
+                    if (isTunerConfirmation && !isTunerModeActive) {
+                        switchInterfaceMode(true);
+                        sendCommand("GET_PROFILES");
+                    } else if (isTunerExitConfirmation && isTunerModeActive) {
+                        switchInterfaceMode(false);
+                    }
+
+                    if (line.startsWith("!PROFILES:")) {
+                        try {
+                            const data = JSON.parse(line.substring(10));
+                            if (data.domains) {
+                                for (let d in data.domains) {
+                                    if (domains[d]) Object.assign(domains[d], data.domains[d]);
+                                }
+                                updateTunerUI();
+                            }
+                        } catch(e) {}
+                    } else if (line.startsWith("!BRAIN:") && !isTunerModeActive) {
+                        try {
+                            const data = JSON.parse(line.substring(7));
+                            updateBrainState(data);
+                        } catch (e) {}
+                    } else {
+                        appendLog(line);
+                    }
+                }
+            }
+        }
+
+        async function sendCommand(cmd) {
+            if (!port || !port.writable) return;
+            try {
+                const textEncoder = new TextEncoder();
+                writer = port.writable.getWriter();
+                await writer.write(textEncoder.encode(cmd + "\n"));
+                writer.releaseLock();
+                appendLog("> " + cmd, "color: #fbeeaa; font-weight: bold;");
+            } catch (err) {}
+        }
+
+        document.getElementById('btnSend').onclick = () => {
+            sendCommand(chatInput.value);
+            chatInput.value = "";
+        };
+
+        chatInput.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                sendCommand(chatInput.value);
+                chatInput.value = "";
+            }
+        });
+
+        document.getElementById('btnClearConsole').onclick = () => {
+            document.getElementById('terminal').innerHTML = "";
+        };
+
+        function appendLog(text, customStyle = "") {
+            const term = document.getElementById('terminal');
+            const div = document.createElement('div');
+            div.className = "log-line";
+            if (customStyle) div.style = customStyle;
+            else if (text.startsWith("[KERNEL]") || text.startsWith("[TEST]")) div.className += " log-kernel";
+            else if (text.startsWith("[MIND]") || text.startsWith("[BRAIN]")) div.className += " log-mind";
+            else if (text.includes("TRIGGER") || text.includes("TUNER") || text.includes("COLOR-SD")) div.className += " log-thought";
+            else if (text.startsWith("[PET]") || text.startsWith("[EVOLUCIÓN")) div.className += " log-pet";
+            else if (text.includes("ALERT") || text.includes("Error") || text.includes("FALLECIDO")) div.className += " log-error";
+
+            div.innerText = text;
+            term.appendChild(div);
+            term.scrollTop = term.scrollHeight;
+        }
+
+        function switchInterfaceMode(toTuner) {
+            isTunerModeActive = toTuner;
+            document.getElementById('main-grid').style.display = toTuner ? "none" : "grid";
+            document.getElementById('tuner-grid').style.display = toTuner ? "grid" : "none";
+            document.getElementById('standardChips').style.display = toTuner ? "none" : "block";
+            document.getElementById('btnExitTunerHeader').style.display = toTuner ? "inline-block" : "none";
+
+            const title = document.getElementById('titleHeader');
+            const sub = document.getElementById('subtitleHeader');
+
+            if (toTuner) {
+                title.innerText = "TAMA // LABORATORIO DE COLOR PERCEPTIVO REC.601";
+                title.style.color = "var(--accent-blue)";
+                sub.innerText = "Luminancia, Exposición, Contraste y Saturación Multidominio";
+                updateTunerUI();
+            } else {
+                title.innerText = "TAMA // MISSION CONTROL & BANCO DE COGNICIÓN";
+                title.style.color = "var(--accent-gold)";
+                sub.innerText = "Control de Estados Biológicos, Sprites y Estimulación SNN";
+            }
+        }
+
+        function enterColorTuner() {
+            appendLog("[INFO] Solicitando TUNECOLOURS al ESP32...", "color: #80deea;");
+            sendCommand("TUNECOLOURS");
+        }
+
+        function exitColorTuner() {
+            appendLog("[INFO] Enviando EXIT al ESP32 (reiniciando)...", "color: #ff8a80;");
+            sendCommand("EXIT");
+        }
+
+        function saveToSD() {
+            appendLog("[INFO] Solicitando persistencia permanente en SD...", "color: #ffd54f;");
+            sendCommand("SAVE");
+        }
+
+        function factoryResetSD() {
+            if (confirm("¿Restaurar todos los perfiles de color a valores de fábrica?")) {
+                for (let d in domains) {
+                    domains[d] = { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 };
+                }
+                updateTunerUI();
+                sendCommand("FACTORY");
+            }
+        }
+
+        // ================= MATEMÁTICA PERCEPTIVA REC. 601 =================
+
+        function clamp(v, min, max) { return Math.min(Math.max(v, min), max); }
+
+        function rgb565(r, g, b) {
+            return ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
+        }
+
+        function applyPerceptualPipeline(r, g, b, p) {
+            // 1. Ganancia Proporcional / Exposición
+            const gain = Math.max(0.0, 1.0 + (p.brightness / 100.0));
+            const r1 = clamp((r + p.deltaR) * gain, 0, 255);
+            const g1 = clamp((g + p.deltaG) * gain, 0, 255);
+            const b1 = clamp((b + p.deltaB) * gain, 0, 255);
+
+            // 2. Contraste centrado en gris medio (128)
+            const cFactor = Math.max(0.0, 1.0 + (p.contrast / 100.0));
+            const r2 = clamp(128.0 + (r1 - 128.0) * cFactor, 0, 255);
+            const g2 = clamp(128.0 + (g1 - 128.0) * cFactor, 0, 255);
+            const b2 = clamp(128.0 + (b1 - 128.0) * cFactor, 0, 255);
+
+            // 3. Saturación Perceptiva contra Luminancia Rec. 601
+            const Y = (77 * r2 + 150 * g2 + 29 * b2) >> 8;
+            const sFactor = Math.max(0.0, 1.0 + (p.saturation / 100.0));
+
+            const rFinal = Math.round(clamp(Y + (r2 - Y) * sFactor, 0, 255));
+            const gFinal = Math.round(clamp(Y + (g2 - Y) * sFactor, 0, 255));
+            const bFinal = Math.round(clamp(Y + (b2 - Y) * sFactor, 0, 255));
+
+            return { r: rFinal, g: gFinal, b: bFinal };
+        }
+
+        function scheduleSendProfile() {
+            pendingSend = true;
+            if (isSending) return;
+            isSending = true;
+
+            requestAnimationFrame(async () => {
+                while (pendingSend) {
+                    pendingSend = false;
+                    if (port && port.writable) {
+                        try {
+                            const p = domains[currentDomain];
+                            const cmd = `TRIM ${currentDomain} ${p.deltaR} ${p.deltaG} ${p.deltaB} ${p.brightness} ${p.contrast} ${p.saturation}\n`;
+                            const encoder = new TextEncoder();
+                            writer = port.writable.getWriter();
+                            await writer.write(encoder.encode(`BASE ${baseR} ${baseG} ${baseB}\n`));
+                            await writer.write(encoder.encode(cmd));
+                            writer.releaseLock();
+                        } catch(e) {}
+                    }
+                    await new Promise(res => setTimeout(res, 40));
+                }
+                isSending = false;
+            });
+        }
+
+        function switchDomain(dom) {
+            currentDomain = dom;
+            document.querySelectorAll('.domain-btn').forEach(b => {
+                b.classList.toggle('active', b.innerText.includes(dom));
+            });
+            sendCommand(`DOMAIN ${dom}`);
+            updateTunerUI();
+        }
+
+        function onInputProp(prop, val) {
+            domains[currentDomain][prop] = clamp(parseInt(val) || 0, -100, 100);
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function stepProp(prop, delta) {
+            domains[currentDomain][prop] = clamp(domains[currentDomain][prop] + delta, -100, 100);
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function setProp(prop, val) {
+            domains[currentDomain][prop] = val;
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function resetActiveDomain() {
+            domains[currentDomain] = { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 };
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function updateTunerUI() {
+            const p = domains[currentDomain];
+
+            document.getElementById('sliderBri').value = p.brightness;
+            document.getElementById('numBri').value = p.brightness;
+            document.getElementById('sliderCon').value = p.contrast;
+            document.getElementById('numCon').value = p.contrast;
+            document.getElementById('sliderSat').value = p.saturation;
+            document.getElementById('numSat').value = p.saturation;
+
+            document.getElementById('sliderR').value = p.deltaR;
+            document.getElementById('numR').value = p.deltaR;
+            document.getElementById('sliderG').value = p.deltaG;
+            document.getElementById('numG').value = p.deltaG;
+            document.getElementById('sliderB').value = p.deltaB;
+            document.getElementById('numB').value = p.deltaB;
+
+            const res = applyPerceptualPipeline(baseR, baseG, baseB, p);
+            const orig565 = "0x" + rgb565(baseR, baseG, baseB).toString(16).padStart(4, '0').toUpperCase();
+            const corr565 = "0x" + rgb565(res.r, res.g, res.b).toString(16).padStart(4, '0').toUpperCase();
+
+            document.getElementById('box-original').style.background = `rgb(${baseR}, ${baseG}, ${baseB})`;
+            document.getElementById('txtOrigRGB').innerText = `R:${baseR} G:${baseG} B:${baseB}`;
+            document.getElementById('txtOrig565').innerText = orig565;
+
+            document.getElementById('box-corrected').style.background = `rgb(${res.r}, ${res.g}, ${res.b})`;
+            document.getElementById('txtCorrRGB').innerText = `R:${res.r} G:${res.g} B:${res.b}`;
+            document.getElementById('txtCorr565').innerText = corr565;
+
+            const constName = `COLOR_${currentDomain}_${currentTargetName.toUpperCase().replace(/[^A-Z0-9]/g, '_')}`;
+            const snippet = 
+`// --- Perceptual Profile: ${currentDomain} | Target: "${currentTargetName}" ---
+// Base:       RGB(${baseR}, ${baseG}, ${baseB}) -> ${orig565}
+// Graduación: Exp=${p.brightness >= 0 ? "+" + p.brightness : p.brightness} | Con=${p.contrast >= 0 ? "+" + p.contrast : p.contrast} | Sat=${p.saturation >= 0 ? "+" + p.saturation : p.saturation}
+// Corregido:  RGB(${res.r}, ${res.g}, ${res.b}) -> ${corr565}
+
+// 1. Constante para colors.h:
+#define ${constName} ${corr565}
+
+// 2. Invocación dinámica en render:
+uint16_t c = colorTunerCorrect565(${currentDomain == "TAMA" ? "DOMAIN_TAMA" : "DOMAIN_" + currentDomain}, ${orig565});`;
+
+            document.getElementById('code-output').innerText = snippet;
+        }
+
+        function selectTarget(name, r, g, b, btn) {
+            document.querySelectorAll('.target-chip').forEach(c => c.classList.remove('active'));
+            if (btn) btn.classList.add('active');
+            currentTargetName = name;
+            baseR = r; baseG = g; baseB = b;
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function onCustomTarget(hex) {
+            currentTargetName = "Personalizado";
+            baseR = parseInt(hex.substr(1, 2), 16);
+            baseG = parseInt(hex.substr(3, 2), 16);
+            baseB = parseInt(hex.substr(5, 2), 16);
+            document.querySelectorAll('.target-chip').forEach(c => c.classList.remove('active'));
+            updateTunerUI();
+            scheduleSendProfile();
+        }
+
+        function copySnippet() {
+            navigator.clipboard.writeText(document.getElementById('code-output').innerText).then(() => {
+                alert("¡Código C++ copiado al portapapeles!");
+            });
+        }
+
+        // ================= CONECTOMA SNN TELEMETRÍA =================
+
+        function updateBrainState(data) {
+            document.getElementById('lblSpikeRate').innerText = Number(data.spikeRate).toFixed(1);
+            document.getElementById('lblDopamine').innerText = Number(data.dopamine).toFixed(2);
+            if (data.rumination !== undefined) {
+                document.getElementById('lblRumination').innerText = Number(data.rumination).toFixed(2);
+            }
+            document.getElementById('lblThoughtName').innerText = data.thoughtName || "En calma";
+            document.getElementById('lblThoughtReason').innerText = data.thoughtReason || "Mente en reposo.";
+
+            if (data.drives) {
+                document.getElementById('barHunger').style.width = data.drives.hunger + "%";
+                document.getElementById('txtHunger').innerText = Math.round(data.drives.hunger) + "%";
+
+                document.getElementById('barSocial').style.width = data.drives.social + "%";
+                document.getElementById('txtSocial').innerText = Math.round(data.drives.social) + "%";
+
+                document.getElementById('barSleep').style.width = data.drives.sleep + "%";
+                document.getElementById('txtSleep').innerText = Math.round(data.drives.sleep) + "%";
+
+                document.getElementById('barDistress').style.width = data.drives.distress + "%";
+                document.getElementById('txtDistress').innerText = Math.round(data.drives.distress) + "%";
+            }
+
+            if (data.neurons) {
+                for (let i = 0; i < Math.min(neurons.length, data.neurons.length); i++) {
+                    neurons[i].v = data.neurons[i].v;
+                    neurons[i].th = data.neurons[i].th;
+                    neurons[i].spike = data.neurons[i].spk;
+                }
+            }
+
+            if (data.synapses) {
+                synapses = data.synapses;
+            }
+        }
+
+        function drawCanvas() {
+            if (!isTunerModeActive) {
+                const cvs = document.getElementById('canvas');
+                const ctx = cvs.getContext('2d');
+                ctx.clearRect(0, 0, cvs.width, cvs.height);
+
+                for (let s of synapses) {
+                    let pre = neurons[s.pre];
+                    let post = neurons[s.post];
+                    if (!pre || !post) continue;
+
+                    ctx.beginPath();
+                    ctx.moveTo(pre.x, pre.y);
+                    ctx.bezierCurveTo(pre.x + 220, pre.y, post.x - 220, post.y, post.x, post.y);
+                    ctx.lineWidth = Math.max(1.2, Math.abs(s.w) * 2.8);
+
+                    if (pre.spike) {
+                        ctx.strokeStyle = "#ffffff";
+                        ctx.shadowColor = "#ffffff";
+                        ctx.shadowBlur = 15;
+                    } else if (s.w < 0) {
+                        ctx.strokeStyle = `rgba(100, 180, 246, ${Math.min(0.85, Math.abs(s.w) * 0.55)})`;
+                        ctx.shadowBlur = 0;
+                    } else {
+                        ctx.strokeStyle = `rgba(180, 140, 220, ${Math.min(0.9, s.w * 0.45)})`;
+                        ctx.shadowBlur = 0;
+                    }
+                    ctx.stroke();
+                    ctx.shadowBlur = 0;
+
+                    let mx = (pre.x + post.x) / 2;
+                    let my = (pre.y + post.y) / 2;
+                    ctx.fillStyle = s.w < 0 ? "#80deea" : "#ffd54f";
+                    ctx.font = "10px monospace";
+                    ctx.fillText(`w=${s.w.toFixed(2)}`, mx, my);
+                }
+
+                for (let n of neurons) {
+                    ctx.beginPath();
+                    ctx.arc(n.x, n.y, n.spike ? 24 : 17, 0, Math.PI * 2);
+                    ctx.fillStyle = n.spike ? "#ffffff" : n.col;
+                    ctx.shadowColor = n.col;
+                    ctx.shadowBlur = n.spike ? 25 : 6;
+                    ctx.fill();
+                    ctx.shadowBlur = 0;
+
+                    ctx.fillStyle = "#ffffff";
+                    ctx.font = "bold 11px monospace";
+                    ctx.fillText(n.name, n.x - 28, n.y - 25);
+
+                    ctx.fillStyle = "#ffe082";
+                    ctx.font = "10px monospace";
+                    ctx.fillText(`V:${n.v.toFixed(2)}/${n.th.toFixed(1)}`, n.x - 25, n.y + 30);
+                }
+            }
+            requestAnimationFrame(drawCanvas);
+        }
+        drawCanvas();
+    </script>
+</body>
+</html>

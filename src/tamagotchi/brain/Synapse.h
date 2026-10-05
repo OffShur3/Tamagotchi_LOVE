@@ -9,15 +9,15 @@ struct Synapse {
     float maxWeight;
     float minWeight;
 
-    // Constructor por defecto
+    // Constructor por defecto con soporte de pesos con signo [-2.0, 2.0]
     Synapse() 
-        : preIndex(0), postIndex(0), weight(1.0f), maxWeight(2.0f), minWeight(0.1f) {}
+        : preIndex(0), postIndex(0), weight(1.0f), maxWeight(2.0f), minWeight(-2.0f) {}
 
-    // Constructor formal compatible con GCC 8.4 (C++11 / C++14 / C++17)
-    Synapse(int pre, int post, float w, float maxW = 2.0f, float minW = 0.1f)
+    // Constructor formal con soporte de sinapsis inhibitorias negativas
+    Synapse(int pre, int post, float w, float maxW = 2.0f, float minW = -2.0f)
         : preIndex(pre), postIndex(post), weight(w), maxWeight(maxW), minWeight(minW) {}
 
-    // Modulación por recompensa Hebbiana
+    // Modulación por plasticidad / recompensa dentro de los límites con signo
     void reinforce(float learningRate, float reward) {
         weight += learningRate * reward;
         if (weight > maxWeight) weight = maxWeight;

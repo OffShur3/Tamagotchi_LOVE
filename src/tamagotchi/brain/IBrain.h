@@ -11,6 +11,8 @@ struct PetSensoryInput {
     int poopCount;
     bool lightsOn;
     bool touched;
+    PetStage stage;
+    bool isEgg;
 };
 
 class IBrain {
@@ -22,11 +24,17 @@ public:
     virtual void emitReward(float amount) = 0;
     virtual PetState getDecision() const = 0;
 
-    // Notificación de que el usuario alimentó a la mascota
     virtual void onFed() {}
 
     virtual float getSpikeRate() const { return 0.0f; }
     virtual float getDopamineLevel() const { return 0.0f; }
     virtual float getStressLevel() const { return 0.0f; }
+    virtual float getRuminationLevel() const { return 0.0f; }
+    virtual float getHungerMetabolicRate() const { return 1.0f; }
+    virtual float getEnergyDrainMultiplier() const { return 1.0f; }
+    virtual float getStressMultiplier() const { return 1.0f; }
+    virtual float getAffectionWeight() const { return 0.8f; }
     virtual const char* getName() const = 0;
+
+    virtual String getTelemetryJson() const { return "{}"; }
 };

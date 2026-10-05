@@ -29,30 +29,49 @@ public:
     void clean();
     void toggleLights();
 
-    // SOLUCIÓN: La muerte forzada es terminal e irreversible
     void forceState(PetState newState) {
         state = newState;
         if (newState == PetState::Dead) {
-            stage = PetStage::Dead;
             health = 0.0f;
-            actionTimer = 0.0f; // Sin temporizador: muerte permanente
-            Serial.println("[DEBUG] Muerte permanente. El Tamagotchi no resucitará. Usa 'RESET' para una nueva partida.");
+            actionTimer = 0.0f; 
+            Serial.printf("[PET-ALERT] Mascota fallecida. Etapa: %s | Mostrando %s/dead.png\n", 
+                          stageToString(stage).c_str(), stageToString(stage).c_str());
         } else {
-            actionTimer = 5.0f; // 5 segundos para apreciar animaciones temporales
+            actionTimer = 5.0f; 
             Serial.printf("[DEBUG] Estado forzado a: %s (5 segundos)\n", stateToString(newState).c_str());
         }
         save();
     }
 
+    // --- Métodos de la suite de pruebas ---
     void forcePoop();
+    void maxPoop() { poopCount = 3; poopTimer = 0.0f; save(); }
     void drainEnergy(float amount = 50.0f);
     void makeSick();
+    void starve() { hunger = 0.0f; state = PetState::Sad; save(); }
+    void makeBored() { happiness = 10.0f; state = PetState::Sad; save(); }
+    void makeHappy() { happiness = 100.0f; if (brain) brain->emitReward(1.0f); save(); }
+    void godMode() {
+        hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f;
+        poopCount = 0; state = PetState::Idle; save();
+        Serial.println("[TEST] Modo Dios activado: 100% en todas las estadisticas.");
+    }
+    void revive() {
+        state = PetState::Idle;
+        health = 100.0f; energy = 100.0f; hunger = 100.0f; happiness = 100.0f;
+        poopCount = 0;
+        if (stage == PetStage::Dead) stage = PetStage::Baby;
+        Serial.println("[TEST] Mascota revivida con exito!");
+        save();
+    }
+    void evolveNextStage();
+    void jumpToStage(PetStage s);
     void accelerateAge(float seconds = 3600.0f);
 
     void setBrain(std::unique_ptr<IBrain> newBrain);
+    IBrain* getBrain() const { return brain.get(); }
 
     void printStats() const;
-    // Consulta del icono mental activo para el globo
     int getThoughtIcon() const {
         return brain ? static_cast<Brain*>(brain.get())->getActiveThought() : -1;
     }

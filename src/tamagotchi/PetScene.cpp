@@ -2,6 +2,8 @@
 #include "PetScene.h"
 #include "../assets/AssetManager.h"
 #include <Arduino.h>
+#include <SD_MMC.h>
+#include <math.h>
 
 PetScene::PetScene(Pet& petRef) : pet(petRef) {}
 
@@ -14,6 +16,10 @@ void PetScene::enter() {
 
     thoughtBubble = std::make_shared<ThoughtBubble>(pet);
     addObject(thoughtBubble);
+
+    messagePopup = std::make_shared<MessagePopup>();
+    addObject(messagePopup);
+    MessageManager::getInstance().init();
 
     auto uiTex = AssetManager::getInstance().getTexture("/tama/ui/icons_ui.png");
     if (uiTex) {
@@ -58,6 +64,8 @@ void PetScene::enter() {
     }
 
     lastKnownStage = pet.getStage();
+    dreamTimer = 0.0f;
+    nextDreamInterval = (float)random(45, 60);
     updateSpriteTexture();
 }
 
@@ -71,9 +79,80 @@ void PetScene::exit() {
     thoughtBubble = nullptr;
     evolutionVortex = nullptr;
     evolutionOverlay = nullptr;
+    messagePopup = nullptr;
 }
 
-// INICIAR SECUENCIA GBA CON CAPAS SEPARADAS
+void PetScene::startAnimationTest() {
+    if (isEvolving) return;
+    availableTestAnims.clear();
+
+    static const PetStage stagesToScan[] = {
+        PetStage::Egg, PetStage::Baby, PetStage::Child, PetStage::Adult, PetStage::Senior
+    };
+    static const char* animsToScan[] = {
+        "idle", "happy", "eating", "sleeping", "sick", "sad", "dead"
+    };
+
+    for (PetStage st : stagesToScan) {
+        String stName = stageToString(st);
+        for (const char* an : animsToScan) {
+            String path = "/tama/sprites/base/" + pet.getSpecies() + "/" + stName + "/" + an + ".png";
+            if (SD_MMC.exists(path)) {
+                availableTestAnims.push_back({st, String(an), path});
+            }
+        }
+    }
+
+    if (availableTestAnims.empty()) {
+        Serial.println("[TEST-ANIMS] No se encontraron animaciones instaladas en la SD.");
+        return;
+    }
+
+    isAnimTestActive = true;
+    animTestIndex = 0;
+    animTestTimer = 0.0f;
+    Serial.println("\n==================================================");
+    Serial.printf("  SHOWCASE DINÁMICO: %d ANIMACIONES ENCONTRADAS\n", (int)availableTestAnims.size());
+    Serial.println("==================================================");
+    loadTestAnimation();
+}
+
+void PetScene::loadTestAnimation() {
+    if (animTestIndex >= availableTestAnims.size()) return;
+
+    const auto& entry = availableTestAnims[animTestIndex];
+    auto tex = AssetManager::getInstance().getTexture(entry.path.c_str());
+
+    if (tex && petSprite) {
+        petSprite->texture = tex;
+        petSprite->frameSize = {48, 48};
+        petSprite->frameOffset = {0, 0};
+        petSprite->position = { (int16_t)((172 - 144) / 2), (int16_t)((320 - 144) / 2) };
+        totalFrames = max(1, tex->width / 48);
+        currentFrame = 0;
+
+        Serial.printf("[TEST-ANIMS] [%2d/%2d] %-7s / %-8s (%d frames) -> 2.0s\n", 
+                      (int)(animTestIndex + 1), (int)availableTestAnims.size(), 
+                      stageToString(entry.stage).c_str(), entry.animName.c_str(), totalFrames);
+    }
+}
+
+void PetScene::processAnimationTest(float dt) {
+    animTestTimer += dt;
+    if (animTestTimer >= 2.0f) {
+        animTestTimer = 0.0f;
+        animTestIndex++;
+        if (animTestIndex >= availableTestAnims.size()) {
+            isAnimTestActive = false;
+            Serial.println("[TEST-ANIMS] Showcase finalizado con exito. Volviendo a la mascota.");
+            currentTexturePath = ""; 
+            updateSpriteTexture();
+            return;
+        }
+        loadTestAnimation();
+    }
+}
+
 void PetScene::startEvolutionSequence(PetStage oldStage) {
     isEvolving = true;
     evolutionTimer = 0.0f;
@@ -82,10 +161,10 @@ void PetScene::startEvolutionSequence(PetStage oldStage) {
     showNewStage = false;
     silhouetteColorToggle = 0;
 
-    // 1. Ocultar widgets secundarios
     if (clockWidget)   clockWidget->visible = false;
     if (statusHUD)     statusHUD->visible = false;
     if (thoughtBubble) thoughtBubble->visible = false;
+    if (messagePopup)  messagePopup->visible = false;
     if (btnFood)       btnFood->visible = false;
     if (btnMed)        btnMed->visible = false;
     if (btnClean)      btnClean->visible = false;
@@ -94,21 +173,18 @@ void PetScene::startEvolutionSequence(PetStage oldStage) {
         if (poopSprites[i]) poopSprites[i]->visible = false;
     }
 
-    // 2. Capa 1 (World): Vórtice que tapa el fondo 100% (Detrás del bicho)
     evolutionVortex = std::make_shared<EvolutionVortex>();
-    evolutionVortex->visible = false; // Comienza oculto hasta que termine el fundido a blanco
+    evolutionVortex->visible = false; 
     addObject(evolutionVortex);
 
-    // 3. Capa 5 (Popup): Fundido blanco en 5 pasos y cuadro de texto (Delante de todo)
     evolutionOverlay = std::make_shared<EvolutionOverlay>();
     evolutionOverlay->setStageNames(stageToString(oldStage), stageToString(pet.getStage()));
     evolutionOverlay->setFadeStep(0);
     addObject(evolutionOverlay);
 
-    // 4. Preparar sprites de las dos etapas (Capa 2: Characters)
     oldPetSprite = petSprite;
     if (oldPetSprite) {
-        oldPetSprite->silhouetteMode = false; // Comienza en color real hasta que la pantalla se vuelva blanca
+        oldPetSprite->silhouetteMode = false;
         oldPetSprite->visible = true;
     }
 
@@ -122,48 +198,40 @@ void PetScene::startEvolutionSequence(PetStage oldStage) {
         petSprite->visible = false;
     }
 
-    Serial.println("\n[EVOLUCIÓN GBA] ¡Iniciando fundido blanco y alternancia de siluetas!");
+    Serial.println("\n[EVOLUCIÓN GBA] Iniciando fundido blanco y alternancia de siluetas!");
 }
 
-// CINEMÁTICA EN 5 FASES
 void PetScene::processEvolutionSequence(float dt) {
     evolutionTimer += dt;
 
     if (evolutionVortex)  evolutionVortex->update(dt);
     if (evolutionOverlay) evolutionOverlay->update(dt);
 
-    // FASE 1: FUNDIDO A BLANCO EN 5 PASOS (0.0s a 0.35s)
     if (evolutionTimer < 0.35f) {
-        // Mapear el tiempo en 5 pasos (0 a 5)
         uint8_t step = (uint8_t)constrain((evolutionTimer / 0.35f) * 5.0f, 0.0f, 5.0f);
         if (evolutionOverlay) {
             evolutionOverlay->setFadeStep(step);
             evolutionOverlay->setDialogueActive(false, false);
         }
     }
-    // FASE 2: APERTURA DE LA ARENA DESDE BLANCO (0.35s a 0.70s)
     else if (evolutionTimer >= 0.35f && evolutionTimer < 0.70f) {
-        // La pantalla está totalmente blanca. Cambiamos el fondo al vórtice oscuro y activamos la silueta
         if (evolutionVortex) evolutionVortex->visible = true;
         if (oldPetSprite) {
             oldPetSprite->silhouetteMode = true;
             oldPetSprite->silhouetteColor = 0xFFFF;
         }
 
-        // Desvanecer el blanco en 5 pasos inversos (5 a 0)
         float progress = (evolutionTimer - 0.35f) / 0.35f;
         uint8_t step = 5 - (uint8_t)constrain(progress * 5.0f, 0.0f, 5.0f);
         if (evolutionOverlay) {
             evolutionOverlay->setFadeStep(step);
-            evolutionOverlay->setDialogueActive(true, false); // Mostrar "¿Que? ¡Esta evolucionando!"
+            evolutionOverlay->setDialogueActive(true, false);
         }
     }
-    // FASE 3: ALTERNANCIA ACELERADA DE SILUETAS EN EL VÓRTICE (0.70s a 4.2s)
     else if (evolutionTimer >= 0.70f && evolutionTimer < 4.2f) {
-        if (evolutionOverlay) evolutionOverlay->setFadeStep(0); // Sin velo blanco
+        if (evolutionOverlay) evolutionOverlay->setFadeStep(0);
 
         flickerTimer += dt;
-        // Aceleración de 350ms a 35ms
         currentFlickerInterval = max(0.035f, 0.35f - ((evolutionTimer - 0.70f) / 3.5f) * 0.315f);
 
         if (flickerTimer >= currentFlickerInterval) {
@@ -171,33 +239,30 @@ void PetScene::processEvolutionSequence(float dt) {
             showNewStage = !showNewStage;
             silhouetteColorToggle = (silhouetteColorToggle + 1) % 2;
 
-            // Titilar entre Blanco Puro (0xFFFF) y Gris Metálico radiante (0xD69A)
             uint16_t currentShade = (silhouetteColorToggle == 0) ? 0xFFFF : 0xD69A;
 
             if (oldPetSprite) {
                 oldPetSprite->silhouetteColor = currentShade;
-                oldPetSprite->visible = !showNewStage; // Muestra la etapa vieja
+                oldPetSprite->visible = !showNewStage;
             }
             if (petSprite) {
                 petSprite->silhouetteColor = currentShade;
-                petSprite->visible = showNewStage;     // Muestra la etapa nueva
+                petSprite->visible = showNewStage;
             }
         }
     }
-    // FASE 4: DESTELLO BLANCO CEGADOR DE ESTALLIDO (4.2s a 4.45s)
     else if (evolutionTimer >= 4.2f && evolutionTimer < 4.45f) {
         if (evolutionOverlay) {
-            evolutionOverlay->setFadeStep(5); // 100% Blanco total
+            evolutionOverlay->setFadeStep(5);
             evolutionOverlay->setDialogueActive(false, false);
         }
         if (oldPetSprite) oldPetSprite->visible = false;
         if (petSprite)    petSprite->visible = false;
     }
-    // FASE 5: REVELACIÓN EN FULL COLOR + DIÁLOGO DE VICTORIA (4.45s a 5.6s)
     else if (evolutionTimer >= 4.45f && evolutionTimer < 5.6f) {
         if (evolutionOverlay) {
-            evolutionOverlay->setFadeStep(0); // Despejar blanco
-            evolutionOverlay->setDialogueActive(true, true); // "¿Felicidades! Ha evolucionado a..."
+            evolutionOverlay->setFadeStep(0);
+            evolutionOverlay->setDialogueActive(true, true);
         }
         
         if (oldPetSprite) {
@@ -206,17 +271,15 @@ void PetScene::processEvolutionSequence(float dt) {
         }
 
         if (petSprite) {
-            petSprite->silhouetteMode = false; // ¡Desactivar silueta! Revelar en color real
+            petSprite->silhouetteMode = false;
             petSprite->visible = true;
         }
     }
-    // FASE 6: FUNDIDO FINAL DE RETORNO AL JUEGO EN 5 PASOS (5.6s a 6.0s)
     else if (evolutionTimer >= 5.6f && evolutionTimer < 6.0f) {
         float progress = (evolutionTimer - 5.6f) / 0.4f;
         uint8_t step = (uint8_t)constrain(progress * 5.0f, 0.0f, 5.0f);
         if (evolutionOverlay) evolutionOverlay->setFadeStep(step);
     }
-    // FINALIZACIÓN: Regreso al cuarto normal limpio
     else if (evolutionTimer >= 6.0f) {
         isEvolving = false;
 
@@ -229,7 +292,6 @@ void PetScene::processEvolutionSequence(float dt) {
             evolutionOverlay = nullptr;
         }
 
-        // Restaurar elementos del juego
         if (clockWidget)   clockWidget->visible = true;
         if (statusHUD)     statusHUD->visible = true;
         if (thoughtBubble) thoughtBubble->visible = true;
@@ -243,7 +305,7 @@ void PetScene::processEvolutionSequence(float dt) {
             petSprite->visible = true;
         }
 
-        Serial.println("[EVOLUCIÓN GBA] ¡Secuencia completada con éxito!");
+        Serial.println("[EVOLUCIÓN GBA] Secuencia completada con exito!");
     }
 }
 
@@ -257,7 +319,7 @@ void PetScene::updateSpriteTexture() {
     if (tex) {
         if (!petSprite) {
             petSprite = std::make_shared<Sprite>(tex);
-            petSprite->layer = RenderLayer::Characters; // Capa 2
+            petSprite->layer = RenderLayer::Characters;
             petSprite->scale = {3, 3}; 
             addObject(petSprite);
         } else {
@@ -274,7 +336,20 @@ void PetScene::updateSpriteTexture() {
 }
 
 void PetScene::update(float dt) {
-    if (!isEvolving && pet.getStage() != lastKnownStage) {
+    if (isAnimTestActive) {
+        processAnimationTest(dt);
+        if (petSprite && totalFrames > 1) {
+            animTimer += dt;
+            if (animTimer >= 0.25f) {
+                animTimer = 0.0f;
+                currentFrame = (currentFrame + 1) % totalFrames;
+                petSprite->frameOffset.x = currentFrame * 48;
+            }
+        }
+        return;
+    }
+
+    if (!isEvolving && pet.getState() != PetState::Dead && pet.getStage() != PetStage::Dead && pet.getStage() != lastKnownStage) {
         PetStage oldStage = lastKnownStage;
         lastKnownStage = pet.getStage();
         startEvolutionSequence(oldStage);
@@ -303,7 +378,83 @@ void PetScene::update(float dt) {
         }
     }
 
+    // Telemetría WebSerial en vivo cada 100 ms
+    telemetryBroadcastTimer += dt;
+    if (telemetryBroadcastTimer >= 0.1f) {
+        telemetryBroadcastTimer = 0.0f;
+        if (pet.getBrain()) {
+            Serial.println("!BRAIN:" + pet.getBrain()->getTelemetryJson());
+        }
+    }
+
+    // 1. Despacho de mensajes (vigilia o sueño)
+    if (MessageManager::getInstance().hasPendingMessage()) {
+        if (messagePopup) {
+            bool isDream = MessageManager::getInstance().isPendingDream();
+            messagePopup->showMessage(MessageManager::getInstance().consumeMessage(), 4.0f, isDream);
+        }
+    }
+
+    // 2. Control de Diálogos / Sueños según estado biológico
+    if (pet.getStage() != PetStage::Egg && pet.getState() != PetState::Dead) {
+        if (pet.getState() == PetState::Sleeping) {
+            // SUPRESIÓN ABSOLUTA DE MONÓLOGO DESPIERTO DURANTE EL SUEÑO
+            spontaneousThoughtTimer = 0.0f;
+
+            // Avance del ciclo de sueños subconscientes (cada 45-60s)
+            dreamTimer += dt;
+            if (dreamTimer >= nextDreamInterval) {
+                dreamTimer = 0.0f;
+                nextDreamInterval = (float)random(45, 60);
+
+                bool isRestless = (pet.getHunger() < 30.0f || pet.getHealth() < 60.0f || pet.isLightOn() || pet.getPoopCount() > 0);
+                float affWeight = pet.getBrain() ? pet.getBrain()->getAffectionWeight() : 0.8f;
+                bool hasAffection = (affWeight > 1.0f);
+
+                MessageManager::getInstance().requestDreamMessage(pet.getStage(), isRestless, hasAffection);
+            }
+        } else {
+            // Mascota en vigilia: resetear sueños y evaluar monólogo interior
+            dreamTimer = 0.0f;
+
+            spontaneousThoughtTimer += dt;
+            if (spontaneousThoughtTimer >= 40.0f) {
+                spontaneousThoughtTimer = 0.0f;
+
+                if (pet.getState() == PetState::Sick || pet.getHealth() < 40.0f) {
+                    MessageManager::getInstance().requestAiMessage("sick", 
+                        "Salud critica (" + String((int)pet.getHealth()) + "%). Necesita medicina urgente.");
+                }
+                else if (pet.getHunger() < 30.0f) {
+                    MessageManager::getInstance().requestAiMessage("eating", 
+                        "Hambre critica (" + String((int)pet.getHunger()) + "%). Deseo de comida.");
+                }
+                else if (pet.getHappiness() > 70.0f && pet.getHealth() >= 60.0f) {
+                    MessageManager::getInstance().requestAiMessage("happy", 
+                        "Felicidad (" + String((int)pet.getHappiness()) + "% > 70%) y salud consolidada");
+                }
+            }
+        }
+    }
+
+    if (messagePopup) messagePopup->update(dt);
+
     updateSpriteTexture();
+
+    if (petSprite) {
+        petSprite->position.y = (int16_t)((320 - 144) / 2);
+
+        if (totalFrames > 1) {
+            animTimer += dt;
+            if (animTimer >= 0.25f) {
+                animTimer = 0.0f;
+                currentFrame = (currentFrame + 1) % totalFrames;
+                petSprite->frameOffset.x = currentFrame * 48;
+            }
+        } else {
+            petSprite->frameOffset.x = 0;
+        }
+    }
 
     int currentPoops = pet.getPoopCount();
     for (int i = 0; i < 3; i++) {
@@ -315,25 +466,16 @@ void PetScene::update(float dt) {
     if (btnLamp) {
         btnLamp->frameOffset.x = pet.isLightOn() ? 16 : 32;
     }
-
-    if (petSprite && totalFrames > 1) {
-        animTimer += dt;
-        if (animTimer >= 0.25f) {
-            animTimer = 0.0f;
-            currentFrame = (currentFrame + 1) % totalFrames;
-            petSprite->frameOffset.x = currentFrame * 48;
-        }
-    }
 }
 
 void PetScene::startMinigame() {
-    if (pet.getStage() == PetStage::Egg || pet.getState() == PetState::Sleeping) return;
+    if (pet.getStage() == PetStage::Egg || pet.getState() == PetState::Sleeping || pet.getState() == PetState::Dead) return;
     isMinigameActive = true;
     minigameRound = 1;
     minigameScore = 0;
     minigameTimer = 0.0f;
     waitingPlayerChoice = true;
-    Serial.println("\n[MINIJUEGO] ¡Adivina hacia dónde mirará TAMA! Toca la mitad IZQUIERDA o DERECHA.");
+    Serial.println("\n[MINIJUEGO] Adivina hacia donde mirara TAMA! Toca la mitad IZQUIERDA o DERECHA.");
 }
 
 void PetScene::processMinigame(float dt) {
@@ -349,7 +491,7 @@ void PetScene::processMinigame(float dt) {
                 if (petSprite) petSprite->flipX = false;
                 
                 if (minigameScore >= 3) {
-                    Serial.printf("[MINIJUEGO] ¡VICTORIA! Acertaste %d/5. Felicidad al máximo.\n", minigameScore);
+                    Serial.printf("[MINIJUEGO] VICTORIA! Acertaste %d/5. Felicidad al maximo.\n", minigameScore);
                     pet.pet(); 
                 } else {
                     Serial.printf("[MINIJUEGO] Derrota. Solo acertaste %d/5.\n", minigameScore);
@@ -365,6 +507,24 @@ void PetScene::onTouchReleased() {
 }
 
 void PetScene::onTouch(uint16_t x, uint16_t y) {
+    if (messagePopup && messagePopup->visible) {
+        messagePopup->dismiss();
+        return;
+    }
+
+    if (pet.getState() == PetState::Dead || pet.getStage() == PetStage::Dead) {
+        deathTouchTriggered = true;
+        return;
+    }
+
+    if (isAnimTestActive) {
+        isAnimTestActive = false;
+        Serial.println("[TEST-ANIMS] Showcase cancelado por toque en pantalla.");
+        currentTexturePath = "";
+        updateSpriteTexture();
+        return;
+    }
+
     if (isEvolving) return; 
 
     if (!pet.isLightOn()) {
@@ -387,7 +547,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
 
         if (playerChoice == petChoice) {
             minigameScore++;
-            Serial.printf("[MINIJUEGO] Ronda %d: ¡ACERTASTE! (Puntaje: %d)\n", minigameRound, minigameScore);
+            Serial.printf("[MINIJUEGO] Ronda %d: ACERTASTE! (Puntaje: %d)\n", minigameRound, minigameScore);
         } else {
             Serial.printf("[MINIJUEGO] Ronda %d: Fallaste. (Puntaje: %d)\n", minigameRound, minigameScore);
         }
@@ -397,6 +557,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
+    // Barra de botones inferiores
     if (y >= 250) {
         accumulatedStroke = 0.0f;
         prevPetTouchX = 0;
@@ -428,6 +589,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
+    // Limpieza tocando cacas
     if (pet.getPoopCount() > 0) {
         bool touchRightPoops = (x >= 115 && x <= 170 && y >= 195 && y <= 250);
         bool touchLeftPoop   = (x >= 0 && x <= 50 && y >= 195 && y <= 245);
@@ -439,6 +601,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         }
     }
 
+    // Caricias sobre el cuerpo
     if (x >= 45 && x <= 125 && y >= 110 && y <= 195) {
         if (prevPetTouchX > 0) {
             int16_t dx = abs((int16_t)x - (int16_t)prevPetTouchX);
@@ -453,7 +616,7 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
             accumulatedStroke = 0.0f;
             prevPetTouchX = 0;
             petCooldownTimer = 1.5f;
-            Serial.println("[TOUCH] ¡Gesto de caricia horizontal completado!");
+            Serial.println("[TOUCH] Gesto de caricia completado!");
         }
     } else {
         accumulatedStroke = 0.0f;

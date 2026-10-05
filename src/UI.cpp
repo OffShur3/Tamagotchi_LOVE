@@ -1,12 +1,11 @@
 // src/UI.cpp
 #include "UI.h"
 
-// Colores embebidos nativos en RGB565
 #define TAMA_UI_BG  0xF6FA // Crema claro (#F5DFBF)
 #define TAMA_BROWN  0x4903 // Marrón oscuro (#4C2818)
-#define COLOR_GREEN 0x54A8 // Verde Stardew Valley tierra (#569440)
+#define COLOR_GREEN 0x54A8 // Verde Stardew Valley (#569440)
 #define MAT_BG      0x1042 // Gris oscuro
-#define MAT_OFFLINE 0x4208 // Gris medio/offline
+#define MAT_OFFLINE 0x4208 // Gris medio
 
 void imprimirCentrado(Arduino_GFX* gfx, const char* texto, int y, int size, uint16_t color) {
     gfx->setTextSize(size);
@@ -72,6 +71,35 @@ int UIManager::getUpdatePopupClick(uint16_t tx, uint16_t ty) {
     return 0;
 }
 
+void UIManager::drawDeathPopup(Arduino_GFX* gfx) {
+    gfx->fillRoundRect(14, 84, 148, 156, 12, MAT_BG); 
+    gfx->fillRoundRect(10, 80, 152, 160, 12, TAMA_BROWN); 
+    gfx->fillRoundRect(13, 83, 146, 154, 10, TAMA_UI_BG);
+
+    imprimirCentrado(gfx, "HA MUERTO", 95, 1, 0xF800); // Rojo
+    imprimirCentrado(gfx, "¿Reiniciar partida?", 110, 1, TAMA_BROWN);
+
+    // Botón Sí / Reiniciar
+    gfx->fillRoundRect(22, 130, 128, 35, 8, TAMA_BROWN); 
+    gfx->fillRoundRect(24, 132, 124, 31, 6, COLOR_GREEN); 
+    imprimirCentrado(gfx, "Reiniciar", 142, 1, 0xFFFF);
+
+    // Botón No / Cancelar
+    gfx->fillRoundRect(22, 180, 128, 35, 8, TAMA_BROWN); 
+    gfx->fillRoundRect(24, 182, 124, 31, 6, MAT_OFFLINE); 
+    imprimirCentrado(gfx, "No", 192, 1, 0xFFFF);
+}
+
+int UIManager::getDeathPopupClick(uint16_t tx, uint16_t ty) {
+    if (ty >= 130 && ty <= 165 && tx >= 22 && tx <= 150) {
+        return 1; // Reiniciar partida
+    }
+    if (ty >= 180 && ty <= 215 && tx >= 22 && tx <= 150) {
+        return 2; // Cancelar
+    }
+    return 0;
+}
+
 void UIManager::drawUpdateBadge(Arduino_GFX* gfx, int x, int y, int radius) {
     gfx->fillCircle(x, y, radius, 0xF800); 
     gfx->setTextColor(0xFFFF);            
@@ -83,16 +111,14 @@ void UIManager::drawUpdateBadge(Arduino_GFX* gfx, int x, int y, int radius) {
 void UIManager::drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x0, int y0, int radius) {
     if (!fb) return;
     
-    uint16_t colorBg = 0xF800; // Rojo Fuerte
-    uint16_t colorFg = 0xFFFF; // Blanco
+    uint16_t colorBg = 0xF800; 
+    uint16_t colorFg = 0xFFFF; 
     
-    // 1. Dibujar el círculo relleno (Algoritmo rápido de Fuerza Bruta en RAM)
     for (int y = -radius; y <= radius; y++) {
         for (int x = -radius; x <= radius; x++) {
             if (x * x + y * y <= radius * radius) {
                 int px = x0 + x;
                 int py = y0 + y;
-                // Prevenir desbordamientos fuera de la pantalla
                 if (px >= 0 && px < fbWidth && py >= 0 && py < fbHeight) {
                     fb[py * fbWidth + px] = colorBg;
                 }
@@ -100,8 +126,6 @@ void UIManager::drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x
         }
     }
 
-    // 2. Dibujar el signo de exclamación "!" en el centro (Bigger & Bolder)
-    // Palito superior (grueso)
     for (int dy = -5; dy <= 2; dy++) {
         for (int dx = -1; dx <= 0; dx++) {
             int px = x0 + dx;
@@ -112,7 +136,6 @@ void UIManager::drawUpdateBadgeFB(uint16_t* fb, int fbWidth, int fbHeight, int x
         }
     }
     
-    // Puntito inferior
     for (int dy = 4; dy <= 5; dy++) {
         for (int dx = -1; dx <= 0; dx++) {
             int px = x0 + dx;

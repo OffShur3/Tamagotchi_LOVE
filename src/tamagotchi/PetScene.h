@@ -7,7 +7,10 @@
 #include "StatusHUD.h"
 #include "ThoughtBubble.h"
 #include "EvolutionFX.h"
+#include "MessagePopup.h"
+#include "MessageManager.h"
 #include <memory>
+#include <vector>
 
 class PetScene : public Scene {
 public:
@@ -19,7 +22,12 @@ public:
 
     void onTouch(uint16_t x, uint16_t y);
     void onTouchReleased();
+
     void startMinigame();
+    void startAnimationTest();
+
+    bool hasDeathTouch() const { return deathTouchTriggered; }
+    void clearDeathTouch() { deathTouchTriggered = false; }
 
 private:
     Pet& pet;
@@ -38,14 +46,18 @@ private:
     std::shared_ptr<StatusHUD> statusHUD = nullptr; 
     std::shared_ptr<ThoughtBubble> thoughtBubble = nullptr; 
 
-    // Capas visuales de la evolución
-    std::shared_ptr<EvolutionVortex>  evolutionVortex = nullptr;  // Capa 1: Fondo detrás del bicho
-    std::shared_ptr<EvolutionOverlay> evolutionOverlay = nullptr; // Capa 5: Fundido y Diálogo delante
+    std::shared_ptr<EvolutionVortex>  evolutionVortex = nullptr;  
+    std::shared_ptr<EvolutionOverlay> evolutionOverlay = nullptr; 
+
+    std::shared_ptr<MessagePopup> messagePopup = nullptr;
+    float telemetryBroadcastTimer = 0.0f;
+    float spontaneousThoughtTimer = 0.0f;
+    float dreamTimer = 0.0f;
+    float nextDreamInterval = 45.0f;
 
     String currentTexturePath = "";
     PetStage lastKnownStage = PetStage::Egg;
 
-    // Estados de la cinemática
     bool isEvolving = false;
     float evolutionTimer = 0.0f;
     float flickerTimer = 0.0f;
@@ -64,6 +76,8 @@ private:
     float accumulatedStroke = 0.0f;
     float petCooldownTimer = 0.0f;
 
+    bool deathTouchTriggered = false;
+
     // Minijuego
     bool isMinigameActive = false;
     int minigameRound = 0;
@@ -72,8 +86,21 @@ private:
     int petChoice = 0; 
     bool waitingPlayerChoice = false;
 
+    // Showcase de animaciones
+    struct AnimEntry {
+        PetStage stage;
+        String animName;
+        String path;
+    };
+    std::vector<AnimEntry> availableTestAnims;
+    size_t animTestIndex = 0;
+    float animTestTimer = 0.0f;
+    bool isAnimTestActive = false;
+
     void updateSpriteTexture();
     void startEvolutionSequence(PetStage oldStage);
     void processEvolutionSequence(float dt);
     void processMinigame(float dt);
+    void processAnimationTest(float dt);
+    void loadTestAnimation();
 };

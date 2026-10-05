@@ -5,23 +5,22 @@
 
 class ClockWidget : public RenderObject {
 public:
-    // Variable estática estándar compatible con C++11 (sin warning de inline)
     static bool& getSyncState() {
         static bool synced = false;
         return synced;
     }
     
-    // Macro de compatibilidad
     #define isSyncedWithInternet getSyncState()
 
     ClockWidget() {
         layer = RenderLayer::UI;
-        position = {110, 8}; // Esquina superior derecha
+        position = {110, 8}; 
     }
 
     Size2 getSize() const override { return {54, 18}; }
 
     void draw(RenderContext& ctx) override {
+        // REGLA ESTRICTA: Si no hubo sincronización real NTP en esta sesión, permanece oculto
         if (!visible || !isSyncedWithInternet) return;
 
         uint16_t borderDark  = 0x2104; 
@@ -44,7 +43,7 @@ public:
         }
 
         struct tm timeinfo;
-        char timeStr[6] = "08:00";
+        char timeStr[6] = "00:00";
         if (getLocalTime(&timeinfo, 10)) {
             snprintf(timeStr, sizeof(timeStr), "%02d:%02d", timeinfo.tm_hour, timeinfo.tm_min);
         }

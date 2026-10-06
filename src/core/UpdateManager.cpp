@@ -86,9 +86,26 @@ bool UpdateManager::checkForUpdate() {
 
 void UpdateManager::drawMessage(const String& msg) {
     _lastTitle = ""; 
-    _cfg.gfx->fillScreen(0x18C3); 
-    _cfg.gfx->setTextColor(0xFFFF);
+    
+    // Paleta Stardew/Handheld Retro Cute
+    uint16_t cBg     = 0xF6FA; // Crema cálido
+    uint16_t cBorder = 0x4903; // Marrón oscuro
+    uint16_t cGold   = 0xCE40; // Toque decorativo interior dorado
+
+    _cfg.gfx->fillScreen(cBg); 
+    
+    // Doble marco para simular "cartelito del tamagotchi"
+    _cfg.gfx->drawRect(4, 4, 164, 312, cBorder);
+    _cfg.gfx->drawRect(6, 6, 160, 308, cBorder);
+    _cfg.gfx->drawRect(5, 5, 162, 310, cGold);
+
+    // Antenita decorativa arriba simulando "Wifi en proceso"
+    _cfg.gfx->setTextColor(cBorder, cBg);
     _cfg.gfx->setTextSize(1);
+    _cfg.gfx->setCursor((172 - (11 * 6)) / 2, 28);
+    _cfg.gfx->print("<<< O_O >>>"); 
+
+    // Mensaje Central Principal
     int textX = (172 - (msg.length() * 6)) / 2;
     if (textX < 0) textX = 0;
     _cfg.gfx->setCursor(textX, 150);
@@ -96,34 +113,84 @@ void UpdateManager::drawMessage(const String& msg) {
 }
 
 void UpdateManager::drawProgress(const String& title, int progress, int total) {
+    // Definimos nuevamente la paleta cute para el dibujado incremental
+    uint16_t cBg     = 0xF6FA; // Crema
+    uint16_t cBorder = 0x4903; // Marrón
+    uint16_t cGold   = 0xCE40; // Oro
+    uint16_t cFill   = 0x54A8; // Verde naturaleza / éxito Stardew
+    uint16_t cBarBg  = 0xFFFF; // Interior blanco puro de la barrita para altísimo contraste
+
     if (title != _lastTitle) {
-        _cfg.gfx->fillScreen(0x18C3);
-        _cfg.gfx->setTextColor(0xFFFF);
+        _cfg.gfx->fillScreen(cBg);
+        
+        _cfg.gfx->drawRect(4, 4, 164, 312, cBorder);
+        _cfg.gfx->drawRect(6, 6, 160, 308, cBorder);
+        _cfg.gfx->drawRect(5, 5, 162, 310, cGold);
+        
+        _cfg.gfx->setTextColor(cBorder, cBg);
         _cfg.gfx->setTextSize(1);
+        _cfg.gfx->setCursor((172 - (11 * 6)) / 2, 28);
+        _cfg.gfx->print("<<< v_v >>>"); // Cambio de antenita mientras ya bajando data
+        
         int textX = (172 - (title.length() * 6)) / 2;
         if (textX < 0) textX = 0;
-        _cfg.gfx->setCursor(textX, 100);
+        _cfg.gfx->setCursor(textX, 90); // Arriba de la barra de descarga
         _cfg.gfx->print(title);
         _lastTitle = title;
     }
 
+    // Config de nuestra Barra Chunky 2.0  (Un lindo ancho conteniendo toda la barra de relleno adentro)
+    int barX = 16;
+    int barY = 120;
+    int barW = 140;
+    int barH = 22;
+    
+    // Contorno estático marrón exterior (Sólido como hierro/maderita)
+    _cfg.gfx->drawRect(barX, barY, barW, barH, cBorder);
+
     if (total > 0) {
         int percentage = (progress * 100) / total;
-        _cfg.gfx->fillRect(20, 130, 132, 20, 0x1042);
-        _cfg.gfx->drawRect(20, 130, 132, 20, 0xFFFF);
-        int fillW = (128 * percentage) / 100;
-        if (fillW > 128) fillW = 128;
-        _cfg.gfx->fillRect(22, 132, fillW, 16, 0x54A8); 
-        int percentX = (172 - (4 * 6)) / 2;
-        _cfg.gfx->setTextColor(0xFFFF);
-        _cfg.gfx->setTextSize(1);
-        _cfg.gfx->setCursor(percentX + 2, 160);
-        _cfg.gfx->printf("%d%%", percentage);
+        
+        int innerMaxW = barW - 4; // Margen pixelizado interno - evita rozar los marcos 
+        int fillW = (innerMaxW * percentage) / 100;
+        
+        // Safety lockers
+        if (fillW > innerMaxW) fillW = innerMaxW;
+        if (fillW < 0) fillW = 0;
+
+        // --- ACA ESTA EL TRUCO: DIBUJAMOS FILL EN VERDE... LUEGO TODO LO QUE QUEDA DENTRO LO BARRIDO VACIAMOS A BLANCO
+        if(fillW > 0) {
+            _cfg.gfx->fillRect(barX + 2, barY + 2, fillW, barH - 4, cFill);
+        }
+        if(fillW < innerMaxW) {
+            _cfg.gfx->fillRect(barX + 2 + fillW, barY + 2, innerMaxW - fillW, barH - 4, cBarBg);
+        }
+
+        // Contador Numérico de Doble Parametro (Con Fondo Para no Solapar/Arruinar textos a cuadrados)
+        _cfg.gfx->setTextColor(cBorder, cBg); // !! AQUI - Usamos la magia de render_string cBackground  !! 
+        _cfg.gfx->setTextSize(2);             // Mas Grande el Número Porcentual!
+        
+        char buf[8];
+        snprintf(buf, sizeof(buf), "%3d%%", percentage); // '%3d%%' rellena con un espacio blanco fijo números de un caracter protegiendo tamaño pixel! 
+        int percentX = (172 - (4 * 12)) / 2;  // Size 2 ocupa en pixeles por default 12 de ancho
+        
+        _cfg.gfx->setCursor(percentX, 155);
+        _cfg.gfx->print(buf);
+
     } else {
-        _cfg.gfx->drawRect(20, 130, 132, 20, 0xFFFF);
-        int fill = (progress % 102400) * 128 / 102400;
-        _cfg.gfx->fillRect(22, 132, fill, 16, 0x54A8);
-        _cfg.gfx->fillRect(22 + fill, 132, 128 - fill, 16, 0x18C3);
+        // MODO BOLA DE NIEVE ROTATORIO/DESLIZANTE PARA CUALQUIER OTRA DESCARGA DESCONOCIDA (< 0 TAMANHO).
+        int innerMaxW = barW - 4; 
+        int fillW = (progress % 102400) * innerMaxW / 102400; // Oscilando
+
+        if (fillW > innerMaxW) fillW = innerMaxW;
+        if (fillW < 0) fillW = 0;
+
+        if(fillW > 0) {
+            _cfg.gfx->fillRect(barX + 2, barY + 2, fillW, barH - 4, cFill);
+        }
+        if(fillW < innerMaxW) {
+            _cfg.gfx->fillRect(barX + 2 + fillW, barY + 2, innerMaxW - fillW, barH - 4, cBarBg);
+        }
     }
 }
 
@@ -139,12 +206,12 @@ bool UpdateManager::performFullUpdate() {
     Serial.println("\n=============================================");
     Serial.println("[DEBUG-OTA]      FULL TAMA OS NATIVE MANAGER ");
     Serial.println("=============================================\n");
-    drawMessage("Conexion AWS Cloud...");
+    drawMessage("Mirando hacia el cielo...");
     delay(1000); 
 
     if (_latestVersion.length() == 0 || _latestVersion == "") {
         if (!checkForUpdate()) {
-            drawMessage("Sin Contacto");
+            drawMessage("El cielo no contesta :(");
             delay(3000);
             ESP.restart();
             return false;
@@ -152,26 +219,26 @@ bool UpdateManager::performFullUpdate() {
     }
 
     if (!performSDUpdate()) {
-        drawMessage("Server Caido 1 Nv.");
+        drawMessage("Tropiezo en la red!");
         delay(3000);
         ESP.restart(); 
         return false;
     }
 
-    drawMessage("Soporte Completo SD.");
+    drawMessage("Nuevos dibujos guardados.");
     delay(1000);
 
     if (performFirmwareUpdate()) {
         Serial.println("\n[DEBUG-OTA] Tarea Explicita Completa al 100%");
         writeVersionFile(_latestVersion);
-        drawMessage("Renicio Maquina Vz");
+        drawMessage("Hora de desperezar...");
         Serial.flush();
         delay(2500);
         ESP.restart();
         return true;
     }
     
-    drawMessage("ROM Corrompida AWS");
+    drawMessage("Oops, me confundi... :(");
     delay(4000);
     ESP.restart();
     return false;
@@ -214,7 +281,7 @@ bool UpdateManager::performSDUpdate() {
                 int lastDraw = 0;
                 bool wasCompleted = false;
 
-                drawProgress("Descarga Graficas.", 0, total);
+                drawProgress("Bajando sorpresas...", 0, total);
 
                 while (http.connected() && (len == -1 || written < len)) {
                     size_t available = stream->available();
@@ -225,7 +292,7 @@ bool UpdateManager::performSDUpdate() {
                         written += c;
                         
                         if (written - lastDraw >= 85400) { 
-                             drawProgress("Montando Espacio SD.", written, total);
+                             drawProgress("Llenando mi mochilita...", written, total);
                              lastDraw = written;
                              Serial.printf("[DEBUG-OTA] Alquilado: %d KB de su Server Activo!\n", written / 1024);
                         }
@@ -237,7 +304,7 @@ bool UpdateManager::performSDUpdate() {
                 file.close();
 
                 if (written == total || (total == -1 && written > 0)) {
-                    drawProgress("Trama Estabilizada.", 100, 100);
+                    drawProgress("¡Listo atrapados!", 100, 100);
                     Serial.println("[DEBUG-OTA] Descargando de File F1 Estricto sin perdidas Completas Ok!");
                     wasCompleted = true;
                 }
@@ -245,7 +312,7 @@ bool UpdateManager::performSDUpdate() {
                 http.end(); 
                 
                 if (wasCompleted) {
-                    drawProgress("Transicion al Root..", 50, 100);
+                    drawProgress("Abriendo bolsitas..", 50, 100);
                     extractTar("/update.tar", "/");
                     SD_MMC.remove("/update.tar");
                     return true;
@@ -254,7 +321,7 @@ bool UpdateManager::performSDUpdate() {
                 SD_MMC.remove("/update.tar");
             } 
             else if (httpCode == 404) {
-                drawMessage("Amazon Process Png...");
+                drawMessage("El cielo anda muy lento");
                 http.end();
                 delay(7000); 
             } else {
@@ -303,7 +370,7 @@ bool UpdateManager::performFirmwareUpdate() {
                     if (progress - lastProgress > 95000 || progress == total) { 
                         int percent = (total > 0) ? (progress * 100) / total : 0;
                         Serial.printf("[DEBUG-OTA] Extinguiendo vieja base / Grabando ROM Nucleos... [ %d %% ]\n", percent);
-                        this->drawProgress("Insertando FW", progress, total);
+                        this->drawProgress("Estudiando muchísimo..", progress, total);
                         lastProgress = progress;
                     }
                 });
@@ -312,7 +379,7 @@ bool UpdateManager::performFirmwareUpdate() {
                 stream->setTimeout(15000); // 15s timeout crítico para paquetes de red (Evita el corte de writeStream)
                 
                 Serial.println("[DEBUG-OTA] Instando Flujo OTA Nativo ESP (Blindado contra latencias de Amazon) ...");
-                drawProgress("Descargas al BIOS...", 0, totalLen);
+                drawProgress("Leyendo mi cuentito.", 0, totalLen);
 
                 // Volvemos a la rutina nativa del ESP32 protegida por nuestro setTimeout
                 size_t writtenBytesCoreEsp = Update.writeStream(*stream);
@@ -342,7 +409,7 @@ bool UpdateManager::performFirmwareUpdate() {
 
                 http.end();
             } else if (httpCode == 404) {
-                drawMessage("Amazon Atrasado Nv");
+                drawMessage("Me distraje con una flor.");
                 http.end();
                 delay(7000); 
             } else {

@@ -1,6 +1,8 @@
 // src/ColorTuner.cpp
 #include "ColorTuner.h"
 #include <SD_MMC.h>
+#include <unordered_map>
+#include <math.h>
 
 namespace {
     static Arduino_GFX* _gfx = nullptr;
@@ -8,19 +10,27 @@ namespace {
     static PNG* _png = nullptr;
 
     static uint16_t lineBuffer[320];
+    static uint16_t* bgCache = nullptr;
     static File pngFile;
 
     const char* CONFIG_PATH = "/config/color_tuning.txt";
 
-    // Registros de Hardware
-    static bool currentBGR = true;       // MADCTL: 0x48 (BGR) vs 0x40 (RGB)
-    static bool currentInv = false;      // 0x21 (INVON) vs 0x20 (INVOFF)
+    // Registros de Hardware Globales
+    static bool currentBGR = true;
+    static bool currentInv = false;
     static bool swapPngBytes = false;
 
-    // Tabla de Perfiles por Dominio
+    // Atenuación nocturna
+    static uint8_t nightDimPercent = 75;
+    static bool previewLightsOn = true;
+
+    // Perfiles por Dominio
     static ColorProfile domainProfiles[DOMAIN_COUNT];
 
-    // Dominio activo actualmente en el modo interactivo
+    // Overrides por color específico (RGB565)
+    static std::unordered_map<uint16_t, ColorProfile> colorOverrides;
+
+    // Dominio y color activo
     static ColorDomain activeTunerDomain = DOMAIN_TAMA;
     static uint8_t baseR = 220, baseG = 20, baseB = 20;
 
@@ -37,6 +47,88 @@ namespace {
     inline uint16_t rgbTo565(uint8_t r, uint8_t g, uint8_t b) {
         return ((uint16_t)(r & 0xF8) << 8) | ((uint16_t)(g & 0xFC) << 3) | (b >> 3);
     }
+
+    // --- CONVERSIÓN HSL DESACOPLADA ---
+    static void rgbToHsl(uint8_t r, uint8_t g, uint8_t b, float& h, float& s, float& l) {
+        float rf = r / 255.0f, gf = g / 255.0f, bf = b / 255.0f;
+        float maxVal = max(rf, max(gf, bf)), minVal = min(rf, min(gf, bf));
+        float delta = maxVal - minVal;
+
+        l = (maxVal + minVal) * 0.5f;
+
+        if (delta <= 0.00001f) {
+            h = 0.0f; s = 0.0f; return;
+        }
+
+        s = (l > 0.5f) ? (delta / (2.0f - maxVal - minVal)) : (delta / (maxVal + minVal));
+
+        if (maxVal == rf) {
+            h = 60.0f * (fmodf(((gf - bf) / delta), 6.0f));
+        } else if (maxVal == gf) {
+            h = 60.0f * (((bf - rf) / delta) + 2.0f);
+        } else {
+            h = 60.0f * (((rf - gf) / delta) + 4.0f);
+        }
+        if (h < 0.0f) h += 360.0f;
+    }
+
+    static float hue2rgb(float p, float q, float t) {
+        if (t < 0.0f) t += 1.0f;
+        if (t > 1.0f) t -= 1.0f;
+        if (t < 1.0f / 6.0f) return p + (q - p) * 6.0f * t;
+        if (t < 1.0f / 2.0f) return q;
+        if (t < 2.0f / 3.0f) return p + (q - p) * (2.0f / 3.0f - t) * 6.0f;
+        return p;
+    }
+
+    static void hslToRgb(float h, float s, float l, uint8_t& r, uint8_t& g, uint8_t& b) {
+        if (s <= 0.00001f) {
+            r = g = b = clampU8(l * 255.0f); return;
+        }
+
+        float q = (l < 0.5f) ? (l * (1.0f + s)) : (l + s - l * s);
+        float p = 2.0f * l - q;
+        float hNorm = h / 360.0f;
+
+        r = clampU8(hue2rgb(p, q, hNorm + 1.0f / 3.0f) * 255.0f);
+        g = clampU8(hue2rgb(p, q, hNorm) * 255.0f);
+        b = clampU8(hue2rgb(p, q, hNorm - 1.0f / 3.0f) * 255.0f);
+    }
+
+    static uint16_t applyProfileToRgb(const ColorProfile& p, uint8_t r, uint8_t g, uint8_t b) {
+        if (p.swapRB) { uint8_t tmp = r; r = b; b = tmp; }
+        if (p.invert) { r = 255 - r; g = 255 - g; b = 255 - b; }
+
+        if (p.isNeutral() && !p.swapRB && !p.invert) {
+            return rgbTo565(r, g, b);
+        }
+
+        float h, s, l;
+        rgbToHsl(r, g, b, h, s, l);
+
+        if (p.brightness > 0) l += (1.0f - l) * (p.brightness / 100.0f);
+        else if (p.brightness < 0) l += l * (p.brightness / 100.0f);
+        l = constrain(l, 0.0f, 1.0f);
+
+        if (p.contrast != 0) {
+            float cFactor = max(0.0f, 1.0f + ((float)p.contrast / 100.0f));
+            l = 0.5f + (l - 0.5f) * cFactor;
+            l = constrain(l, 0.0f, 1.0f);
+        }
+
+        if (p.saturation > 0) s += (1.0f - s) * (p.saturation / 100.0f);
+        else if (p.saturation < 0) s += s * (p.saturation / 100.0f);
+        s = constrain(s, 0.0f, 1.0f);
+
+        uint8_t outR, outG, outB;
+        hslToRgb(h, s, l, outR, outG, outB);
+
+        uint8_t finalR = clampU8((float)outR + p.deltaR);
+        uint8_t finalG = clampU8((float)outG + p.deltaG);
+        uint8_t finalB = clampU8((float)outB + p.deltaB);
+
+        return rgbTo565(finalR, finalG, finalB);
+    }
 }
 
 const char* getColorDomainName(ColorDomain domain) {
@@ -46,9 +138,7 @@ const char* getColorDomainName(ColorDomain domain) {
 
 ColorDomain parseColorDomain(const String& name) {
     for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
-        if (name.equalsIgnoreCase(DOMAIN_NAMES[i])) {
-            return (ColorDomain)i;
-        }
+        if (name.equalsIgnoreCase(DOMAIN_NAMES[i])) return (ColorDomain)i;
     }
     return DOMAIN_TAMA;
 }
@@ -58,50 +148,70 @@ ColorProfile& getColorProfile(ColorDomain domain) {
     return domainProfiles[domain];
 }
 
+void setColorOverride(uint16_t color565, const ColorProfile& prof) { colorOverrides[color565] = prof; }
+bool hasColorOverride(uint16_t color565) { return colorOverrides.find(color565) != colorOverrides.end(); }
+void removeColorOverride(uint16_t color565) { colorOverrides.erase(color565); }
+void clearColorOverrides() { colorOverrides.clear(); }
+
 bool getHardwareBGR() { return currentBGR; }
 bool getHardwareInv() { return currentInv; }
 bool getHardwareSwapBytes() { return swapPngBytes; }
 
+uint8_t getNightDimPercent() { return nightDimPercent; }
+void setNightDimPercent(uint8_t val) { nightDimPercent = constrain(val, 0, 100); }
+
+uint16_t applyNightDim565(uint16_t c565) {
+    float mult = 1.0f - ((float)nightDimPercent / 100.0f);
+    uint8_t r = ((c565 >> 11) & 0x1F);
+    uint8_t g = ((c565 >> 5) & 0x3F);
+    uint8_t b = (c565 & 0x1F);
+    r = (uint8_t)(r * mult);
+    g = (uint8_t)(g * mult);
+    b = (uint8_t)(b * mult);
+    return (r << 11) | (g << 5) | b;
+}
+
 bool colorTunerHasEffect(ColorDomain domain) {
     if (domain >= DOMAIN_COUNT) return false;
-    return (!domainProfiles[domain].isNeutral() || swapPngBytes);
+    return (!domainProfiles[domain].isNeutral() || !colorOverrides.empty() || swapPngBytes);
 }
 
 uint16_t colorTunerApply(ColorDomain domain, uint8_t r, uint8_t g, uint8_t b) {
-    if (domain >= DOMAIN_COUNT) domain = DOMAIN_WORLD;
-    const ColorProfile& p = domainProfiles[domain];
+    uint16_t raw565 = rgbTo565(r, g, b);
+    auto it = colorOverrides.find(raw565);
+    uint16_t c565;
+    if (it != colorOverrides.end()) {
+        c565 = applyProfileToRgb(it->second, r, g, b);
+    } else {
+        if (domain >= DOMAIN_COUNT) domain = DOMAIN_WORLD;
+        c565 = applyProfileToRgb(domainProfiles[domain], r, g, b);
+    }
 
-    // Paso 1: Compensación de canal + Exposición (Ganancia Proporcional)
-    float gain = max(0.0f, 1.0f + ((float)p.brightness / 100.0f));
-    float r1 = clampU8(((float)r + p.deltaR) * gain);
-    float g1 = clampU8(((float)g + p.deltaG) * gain);
-    float b1 = clampU8(((float)b + p.deltaB) * gain);
-
-    // Paso 2: Contraste centrado en gris medio (128)
-    float cFactor = max(0.0f, 1.0f + ((float)p.contrast / 100.0f));
-    float r2 = clampU8(128.0f + (r1 - 128.0f) * cFactor);
-    float g2 = clampU8(128.0f + (g1 - 128.0f) * cFactor);
-    float b2 = clampU8(128.0f + (b1 - 128.0f) * cFactor);
-
-    // Paso 3: Saturación Perceptiva contra Luminancia Rec. 601 (Y)
-    uint32_t Y = (77U * (uint32_t)r2 + 150U * (uint32_t)g2 + 29U * (uint32_t)b2) >> 8;
-    float sFactor = max(0.0f, 1.0f + ((float)p.saturation / 100.0f));
-
-    uint8_t rFinal = clampU8((float)Y + (r2 - (float)Y) * sFactor);
-    uint8_t gFinal = clampU8((float)Y + (g2 - (float)Y) * sFactor);
-    uint8_t bFinal = clampU8((float)Y + (b2 - (float)Y) * sFactor);
-
-    uint16_t c565 = rgbTo565(rFinal, gFinal, bFinal);
+    if (!previewLightsOn) c565 = applyNightDim565(c565);
     if (swapPngBytes) c565 = __builtin_bswap16(c565);
     return c565;
 }
 
 uint16_t colorTunerCorrect565(ColorDomain domain, uint16_t c565) {
+    uint16_t key = c565;
     if (swapPngBytes) c565 = __builtin_bswap16(c565);
+
     uint8_t r = ((c565 >> 11) & 0x1F) * 255 / 31;
     uint8_t g = ((c565 >> 5)  & 0x3F) * 255 / 63;
     uint8_t b = (c565 & 0x1F)        * 255 / 31;
-    return colorTunerApply(domain, r, g, b);
+
+    auto it = colorOverrides.find(key);
+    uint16_t res;
+    if (it != colorOverrides.end()) {
+        res = applyProfileToRgb(it->second, r, g, b);
+    } else {
+        if (domain >= DOMAIN_COUNT) domain = DOMAIN_WORLD;
+        res = applyProfileToRgb(domainProfiles[domain], r, g, b);
+    }
+
+    if (!previewLightsOn) res = applyNightDim565(res);
+    if (swapPngBytes) res = __builtin_bswap16(res);
+    return res;
 }
 
 void aplicarHardware() {
@@ -119,102 +229,240 @@ static void* tunerPngOpen(const char *filename, int32_t *size) {
     *size = pngFile.size();
     return &pngFile;
 }
+static void tunerPngClose(void *handle) { if (pngFile) pngFile.close(); }
+static int32_t tunerPngRead(PNGFILE *handle, uint8_t *buffer, int32_t length) { return pngFile.read(buffer, length); }
+static int32_t tunerPngSeek(PNGFILE *handle, int32_t position) { return pngFile.seek(position) ? position : -1; }
 
-static void tunerPngClose(void *handle) { 
-    if (pngFile) pngFile.close(); 
-}
+static int currentPngDestX = 0, currentPngDestY = 0, currentPngScale = 1;
+static ColorDomain currentPngDomain = DOMAIN_WORLD;
 
-static int32_t tunerPngRead(PNGFILE *handle, uint8_t *buffer, int32_t length) { 
-    return pngFile.read(buffer, length); 
-}
-
-static int32_t tunerPngSeek(PNGFILE *handle, int32_t position) { 
-    return pngFile.seek(position) ? position : -1; 
-}
-
-static int tunerPngDraw(PNGDRAW *pDraw) {
-    int y = pDraw->y + 215;
-    if (y >= 320) return 1;
+static int tunerPngDrawGeneric(PNGDRAW *pDraw) {
+    int lineY = currentPngDestY + (pDraw->y * currentPngScale);
+    if (lineY < 0 || lineY >= 320) return 1;
 
     if (pDraw->iPixelType == PNG_PIXEL_TRUECOLOR_ALPHA) {
         uint8_t* src = (uint8_t*)pDraw->pPixels;
-        for (int x = 0; x < pDraw->iWidth && x < 172; ++x) {
-            lineBuffer[x] = colorTunerApply(activeTunerDomain, src[0], src[1], src[2]);
+        for (int x = 0; x < pDraw->iWidth; ++x) {
+            uint8_t a = src[3];
+            if (a > 32) {
+                uint16_t c = colorTunerApply(currentPngDomain, src[0], src[1], src[2]);
+                int startX = currentPngDestX + (x * currentPngScale);
+                for (int sy = 0; sy < currentPngScale; ++sy) {
+                    int py = lineY + sy;
+                    if (py >= 0 && py < 320) {
+                        for (int sx = 0; sx < currentPngScale; ++sx) {
+                            int px = startX + sx;
+                            if (px >= 0 && px < 172) {
+                                _gfx->drawPixel(px, py, c);
+                                if (bgCache && currentPngDomain == DOMAIN_WORLD) {
+                                    bgCache[py * 172 + px] = c;
+                                }
+                            }
+                        }
+                    }
+                }
+            }
             src += 4;
         }
     } else {
         _png->getLineAsRGB565(pDraw, lineBuffer, PNG_RGB565_LITTLE_ENDIAN, 0);
-        for (int x = 0; x < pDraw->iWidth && x < 172; ++x) {
-            lineBuffer[x] = colorTunerCorrect565(activeTunerDomain, lineBuffer[x]);
+        for (int x = 0; x < pDraw->iWidth; ++x) {
+            uint16_t c = colorTunerCorrect565(currentPngDomain, lineBuffer[x]);
+            int startX = currentPngDestX + (x * currentPngScale);
+            for (int sy = 0; sy < currentPngScale; ++sy) {
+                int py = lineY + sy;
+                if (py >= 0 && py < 320) {
+                    for (int sx = 0; sx < currentPngScale; ++sx) {
+                        int px = startX + sx;
+                        if (px >= 0 && px < 172) {
+                            _gfx->drawPixel(px, py, c);
+                            if (bgCache && currentPngDomain == DOMAIN_WORLD) {
+                                bgCache[py * 172 + px] = c;
+                            }
+                        }
+                    }
+                }
+            }
         }
     }
-    _gfx->draw16bitRGBBitmap(10, y, lineBuffer, min(pDraw->iWidth, 152), 1);
     return 1;
 }
 
-static void redibujar() {
+// ================= REDIBUJADO PARCIAL Y TOTAL =================
+
+static void redibujarHud() {
     if (!_gfx) return;
-    _gfx->fillScreen(0x0000);
 
-    // 1. Barras de Referencia RGB puras
-    _gfx->fillRect(10, 8, 48, 20, 0xF800);
-    _gfx->fillRect(62, 8, 48, 20, 0x07E0);
-    _gfx->fillRect(114, 8, 48, 20, 0x001F);
-    _gfx->setTextSize(1); _gfx->setTextColor(0xFFFF);
-    _gfx->setCursor(18, 30); _gfx->print("ROJO");
-    _gfx->setCursor(68, 30); _gfx->print("VERDE");
-    _gfx->setCursor(124, 30); _gfx->print("AZUL");
+    int boxX = 6, boxY = 6, boxW = 160, boxH = 68;
+    uint16_t cBoxBg = 0x1082;
+    uint16_t cBorder = 0x4903;
+    uint16_t cWhite = 0xFFFF;
+    uint16_t cGold  = 0xFEE0;
 
-    // 2. Comparador: Color Base vs Color Corregido
+    _gfx->drawRect(boxX, boxY, boxW, boxH, cBorder);
+    _gfx->drawRect(boxX + 1, boxY + 1, boxW - 2, boxH - 2, cWhite);
+    _gfx->fillRect(boxX + 2, boxY + 2, boxW - 4, boxH - 4, cBoxBg);
+
     uint16_t colOriginal = rgbTo565(baseR, baseG, baseB);
     uint16_t colAjustado = colorTunerApply(activeTunerDomain, baseR, baseG, baseB);
 
-    _gfx->drawRect(10, 42, 73, 40, 0xFFFF);
-    _gfx->fillRect(12, 44, 69, 36, colOriginal);
-    _gfx->setCursor(14, 85); _gfx->print("ORIGINAL");
+    _gfx->drawRect(boxX + 6, boxY + 6, 28, 20, cWhite);
+    _gfx->fillRect(boxX + 7, boxY + 7, 26, 18, colOriginal);
 
-    _gfx->drawRect(89, 42, 73, 40, 0xFFFF);
-    _gfx->fillRect(91, 44, 69, 36, colAjustado);
-    _gfx->setCursor(95, 85); _gfx->print("CORREGIDO");
+    _gfx->drawRect(boxX + 38, boxY + 6, 28, 20, cWhite);
+    _gfx->fillRect(boxX + 39, boxY + 7, 26, 18, colAjustado);
 
-    // 3. Telemetría de la calibración del dominio activo
+    _gfx->setTextSize(1);
+    _gfx->setTextColor(cGold);
+    _gfx->setCursor(boxX + 70, boxY + 8);
+    _gfx->printf("[%s]", DOMAIN_NAMES[activeTunerDomain]);
+
+    _gfx->setTextColor(previewLightsOn ? 0x07E0 : 0x03FF);
+    _gfx->setCursor(boxX + 70, boxY + 18);
+    _gfx->printf("LUZ: %s (%d%%)", previewLightsOn ? "ON" : "OFF", nightDimPercent);
+
     const ColorProfile& cp = domainProfiles[activeTunerDomain];
-    _gfx->setCursor(10, 98);
-    _gfx->printf("DOMINIO: [%s]", DOMAIN_NAMES[activeTunerDomain]);
-    _gfx->setCursor(10, 110);
+    _gfx->setTextColor(cWhite);
+    _gfx->setCursor(boxX + 6, boxY + 30);
     _gfx->printf("dR:%+d dG:%+d dB:%+d", cp.deltaR, cp.deltaG, cp.deltaB);
-    _gfx->setCursor(10, 122);
+
+    _gfx->setCursor(boxX + 6, boxY + 41);
     _gfx->printf("Bri:%+d Con:%+d Sat:%+d", cp.brightness, cp.contrast, cp.saturation);
 
-    _gfx->setCursor(10, 138);
-    _gfx->printf("SD Config: %s", SD_MMC.exists(CONFIG_PATH) ? "ACTIVA" : "DEFECTO");
-    _gfx->setCursor(10, 150);
+    _gfx->setCursor(boxX + 6, boxY + 52);
     _gfx->printf("565: 0x%04X -> 0x%04X", colOriginal, colAjustado);
+}
 
-    // 4. Muestra de Sprite según el dominio seleccionado
-    const char* samplePath = "/tama/ui/icons_ui.png";
-    if (activeTunerDomain == DOMAIN_TAMA && SD_MMC.exists("/tama/sprites/base/tiernito/bebe/idle.png")) {
-        samplePath = "/tama/sprites/base/tiernito/bebe/idle.png";
-    } else if (activeTunerDomain == DOMAIN_WORLD && SD_MMC.exists("/tama/ui/bg_main.png")) {
-        samplePath = "/tama/ui/bg_main.png";
+static void redibujarTama() {
+    if (!_gfx) return;
+
+    int petDestX = (172 - 144) / 2;
+    int petDestY = (320 - 144) / 2 + 10;
+    int petW = 144, petH = 144;
+
+    if (bgCache) {
+        for (int y = 0; y < petH; ++y) {
+            int py = petDestY + y;
+            if (py >= 0 && py < 320) {
+                _gfx->draw16bitRGBBitmap(petDestX, py, &bgCache[py * 172 + petDestX], petW, 1);
+            }
+        }
+    } else {
+        _gfx->fillRect(petDestX, petDestY, petW, petH, 0x18C3);
     }
 
-    if (SD_MMC.exists(samplePath)) {
-        int rc = _png->open(samplePath, tunerPngOpen, tunerPngClose, tunerPngRead, tunerPngSeek, tunerPngDraw);
-        if (rc == PNG_SUCCESS) {
+    const char* petPath = "/tama/sprites/base/tiernito/bebe/idle.png";
+    if (SD_MMC.exists(petPath)) {
+        currentPngDestX = petDestX;
+        currentPngDestY = petDestY;
+        currentPngScale = 3;
+        currentPngDomain = DOMAIN_TAMA;
+        if (_png->open(petPath, tunerPngOpen, tunerPngClose, tunerPngRead, tunerPngSeek, tunerPngDrawGeneric) == PNG_SUCCESS) {
             _png->decode(NULL, 0);
             _png->close();
         }
     }
+    redibujarHud();
+}
+
+static void redibujarTodo() {
+    if (!_gfx) return;
+
+    if (!bgCache) {
+        bgCache = (uint16_t*)heap_caps_malloc(172 * 320 * sizeof(uint16_t), MALLOC_CAP_SPIRAM | MALLOC_CAP_8BIT);
+        if (!bgCache) bgCache = (uint16_t*)malloc(172 * 320 * sizeof(uint16_t));
+    }
+
+    if (SD_MMC.exists("/tama/ui/bg_main.png")) {
+        currentPngDestX = 0; currentPngDestY = 0; currentPngScale = 1; currentPngDomain = DOMAIN_WORLD;
+        if (_png->open("/tama/ui/bg_main.png", tunerPngOpen, tunerPngClose, tunerPngRead, tunerPngSeek, tunerPngDrawGeneric) == PNG_SUCCESS) {
+            _png->decode(NULL, 0);
+            _png->close();
+        }
+    } else {
+        _gfx->fillScreen(0x18C3);
+        if (bgCache) {
+            for (int i = 0; i < 172 * 320; ++i) bgCache[i] = 0x18C3;
+        }
+    }
+
+    const char* petPath = "/tama/sprites/base/tiernito/bebe/idle.png";
+    if (SD_MMC.exists(petPath)) {
+        currentPngDestX = (172 - 144) / 2;
+        currentPngDestY = (320 - 144) / 2 + 10;
+        currentPngScale = 3;
+        currentPngDomain = DOMAIN_TAMA;
+        if (_png->open(petPath, tunerPngOpen, tunerPngClose, tunerPngRead, tunerPngSeek, tunerPngDrawGeneric) == PNG_SUCCESS) {
+            _png->decode(NULL, 0);
+            _png->close();
+        }
+    }
+
+    if (SD_MMC.exists("/tama/ui/icons_ui.png")) {
+        currentPngDestX = 14; currentPngDestY = 275; currentPngScale = 2; currentPngDomain = DOMAIN_BUTTONS;
+        if (_png->open("/tama/ui/icons_ui.png", tunerPngOpen, tunerPngClose, tunerPngRead, tunerPngSeek, tunerPngDrawGeneric) == PNG_SUCCESS) {
+            _png->decode(NULL, 0);
+            _png->close();
+        }
+    }
+
+    redibujarHud();
 }
 
 // ================= SERIALIZACIÓN / PERSISTENCIA EN SD =================
+
+String getRawConfigString() {
+    String out = "";
+    out += "global:bgr=" + String(currentBGR ? 1 : 0) + 
+           ";inv=" + String(currentInv ? 1 : 0) + 
+           ";swap=" + String(swapPngBytes ? 1 : 0) + 
+           ";night=" + String((int)nightDimPercent) + "\n";
+
+    for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
+        const ColorProfile& p = domainProfiles[i];
+        out += String(DOMAIN_NAMES[i]) + ":dr=" + String((int)p.deltaR) +
+               ";dg=" + String((int)p.deltaG) +
+               ";db=" + String((int)p.deltaB) +
+               ";bri=" + String((int)p.brightness) +
+               ";con=" + String((int)p.contrast) +
+               ";sat=" + String((int)p.saturation) +
+               ";swapRB=" + String(p.swapRB ? 1 : 0) +
+               ";inv=" + String(p.invert ? 1 : 0) + "\n";
+    }
+
+    for (const auto& pair : colorOverrides) {
+        char hexBuf[10];
+        snprintf(hexBuf, sizeof(hexBuf), "0x%04X", pair.first);
+        const ColorProfile& p = pair.second;
+        out += String(hexBuf) + ":dr=" + String((int)p.deltaR) +
+               ";dg=" + String((int)p.deltaG) +
+               ";db=" + String((int)p.deltaB) +
+               ";bri=" + String((int)p.brightness) +
+               ";con=" + String((int)p.contrast) +
+               ";sat=" + String((int)p.saturation) +
+               ";swapRB=" + String(p.swapRB ? 1 : 0) +
+               ";inv=" + String(p.invert ? 1 : 0) + "\n";
+    }
+    return out;
+}
+
+void setRawConfigString(const String& raw) {
+    SD_MMC.mkdir("/config");
+    File f = SD_MMC.open(CONFIG_PATH, "w");
+    if (f) {
+        f.print(raw);
+        f.close();
+        loadColorConfigSD(_bus);
+    }
+}
 
 String serializeProfilesJson() {
     String json = "{";
     json += "\"bgr\":" + String(currentBGR ? 1 : 0) + ",";
     json += "\"inv\":" + String(currentInv ? 1 : 0) + ",";
     json += "\"swap\":" + String(swapPngBytes ? 1 : 0) + ",";
+    json += "\"nightDim\":" + String((int)nightDimPercent) + ",";
+    json += "\"lightsOn\":" + String(previewLightsOn ? 1 : 0) + ",";
     json += "\"domains\":{";
     for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
         const ColorProfile& p = domainProfiles[i];
@@ -224,8 +472,29 @@ String serializeProfilesJson() {
         json += "\"db\":" + String((int)p.deltaB) + ",";
         json += "\"bri\":" + String((int)p.brightness) + ",";
         json += "\"con\":" + String((int)p.contrast) + ",";
-        json += "\"sat\":" + String((int)p.saturation) + "}";
+        json += "\"sat\":" + String((int)p.saturation) + ",";
+        json += "\"swapRB\":" + String(p.swapRB ? 1 : 0) + ",";
+        json += "\"inv\":" + String(p.invert ? 1 : 0) + "}";
         if (i < DOMAIN_COUNT - 1) json += ",";
+    }
+    json += "},";
+
+    json += "\"colors\":{";
+    size_t cIdx = 0;
+    for (const auto& pair : colorOverrides) {
+        char hexBuf[8];
+        snprintf(hexBuf, sizeof(hexBuf), "0x%04X", pair.first);
+        const ColorProfile& p = pair.second;
+        json += "\"" + String(hexBuf) + "\":{";
+        json += "\"dr\":" + String((int)p.deltaR) + ",";
+        json += "\"dg\":" + String((int)p.deltaG) + ",";
+        json += "\"db\":" + String((int)p.deltaB) + ",";
+        json += "\"bri\":" + String((int)p.brightness) + ",";
+        json += "\"con\":" + String((int)p.contrast) + ",";
+        json += "\"sat\":" + String((int)p.saturation) + ",";
+        json += "\"swapRB\":" + String(p.swapRB ? 1 : 0) + ",";
+        json += "\"inv\":" + String(p.invert ? 1 : 0) + "}";
+        if (++cIdx < colorOverrides.size()) json += ",";
     }
     json += "}}";
     return json;
@@ -233,13 +502,12 @@ String serializeProfilesJson() {
 
 void loadColorConfigSD(Arduino_DataBus* bus) {
     if (bus) _bus = bus;
-    if (!SD_MMC.exists(CONFIG_PATH)) {
-        Serial.println("[COLOR-SD] Sin tuning previo en SD. Inicializando perfiles neutros.");
-        return;
-    }
+    if (!SD_MMC.exists(CONFIG_PATH)) return;
 
     File f = SD_MMC.open(CONFIG_PATH, "r");
     if (!f) return;
+
+    colorOverrides.clear();
 
     while (f.available()) {
         String line = f.readStringUntil('\n');
@@ -265,9 +533,35 @@ void loadColorConfigSD(Arduino_DataBus* bus) {
                     if (k.equalsIgnoreCase("bgr")) currentBGR = (v.toInt() == 1);
                     else if (k.equalsIgnoreCase("inv")) currentInv = (v.toInt() == 1);
                     else if (k.equalsIgnoreCase("swap")) swapPngBytes = (v.toInt() == 1);
+                    else if (k.equalsIgnoreCase("night")) nightDimPercent = constrain(v.toInt(), 0, 100);
                 }
                 start = semi + 1;
             }
+        } else if (header.startsWith("0x") || header.startsWith("0X")) {
+            uint16_t cKey = (uint16_t)strtoul(header.c_str(), NULL, 16);
+            ColorProfile p;
+
+            int start = 0;
+            while (start < body.length()) {
+                int semi = body.indexOf(';', start);
+                if (semi == -1) semi = body.length();
+                String token = body.substring(start, semi);
+                int eq = token.indexOf('=');
+                if (eq != -1) {
+                    String k = token.substring(0, eq);
+                    int val = token.substring(eq + 1).toInt();
+                    if (k.equalsIgnoreCase("dr")) p.deltaR = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("dg")) p.deltaG = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("db")) p.deltaB = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("bri")) p.brightness = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("con")) p.contrast = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("sat")) p.saturation = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("swapRB")) p.swapRB = (val == 1);
+                    else if (k.equalsIgnoreCase("inv")) p.invert = (val == 1);
+                }
+                start = semi + 1;
+            }
+            colorOverrides[cKey] = p;
         } else {
             ColorDomain d = parseColorDomain(header);
             ColorProfile& p = domainProfiles[d];
@@ -287,52 +581,39 @@ void loadColorConfigSD(Arduino_DataBus* bus) {
                     else if (k.equalsIgnoreCase("bri")) p.brightness = constrain(val, -100, 100);
                     else if (k.equalsIgnoreCase("con")) p.contrast = constrain(val, -100, 100);
                     else if (k.equalsIgnoreCase("sat")) p.saturation = constrain(val, -100, 100);
+                    else if (k.equalsIgnoreCase("swapRB")) p.swapRB = (val == 1);
+                    else if (k.equalsIgnoreCase("inv")) p.invert = (val == 1);
                 }
                 start = semi + 1;
             }
         }
     }
     f.close();
-
-    Serial.println("[COLOR-SD] Perfiles multidominio cargados exitosamente de la SD.");
     aplicarHardware();
 }
 
 void saveColorConfigSD() {
     SD_MMC.mkdir("/config");
     File f = SD_MMC.open(CONFIG_PATH, "w");
-    if (!f) {
-        Serial.println("[COLOR-SD] Error: No se pudo escribir /config/color_tuning.txt");
-        return;
+    if (f) {
+        f.print(getRawConfigString());
+        f.close();
+        Serial.println("[COLOR-SD] Configuracion guardada exitosamente.");
     }
-
-    f.printf("global:bgr=%d;inv=%d;swap=%d\n", currentBGR ? 1 : 0, currentInv ? 1 : 0, swapPngBytes ? 1 : 0);
-    for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
-        const ColorProfile& p = domainProfiles[i];
-        f.printf("%s:dr=%d;dg=%d;db=%d;bri=%d;con=%d;sat=%d\n",
-                 DOMAIN_NAMES[i], (int)p.deltaR, (int)p.deltaG, (int)p.deltaB,
-                 (int)p.brightness, (int)p.contrast, (int)p.saturation);
-    }
-    f.close();
-    Serial.println("[COLOR-SD] Configuración multidominio guardada permanentemente en SD.");
 }
 
 void factoryResetColorSD(Arduino_DataBus* bus) {
     if (bus) _bus = bus;
-    if (SD_MMC.exists(CONFIG_PATH)) {
-        SD_MMC.remove(CONFIG_PATH);
-        Serial.println("[COLOR-SD] Archivo de calibración eliminado de la SD.");
-    }
+    if (SD_MMC.exists(CONFIG_PATH)) SD_MMC.remove(CONFIG_PATH);
 
     currentBGR = true;
     currentInv = false;
     swapPngBytes = false;
-    for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
-        domainProfiles[i] = ColorProfile();
-    }
-
+    nightDimPercent = 75;
+    previewLightsOn = true;
+    for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) domainProfiles[i] = ColorProfile();
+    colorOverrides.clear();
     aplicarHardware();
-    Serial.println("[COLOR-SD] Valores de fábrica restaurados para todos los dominios.");
 }
 
 // ================= BUCLE PRINCIPAL DEL TUNER =================
@@ -342,19 +623,12 @@ void runColorTuner(Arduino_GFX* gfx, Arduino_DataBus* bus, PNG* pngInstance) {
     _bus = bus;
     _png = pngInstance;
 
+    Serial.println("\n==================================================");
+    Serial.println("[TUNER] TAMA COLOR TUNER EN EJECUCION");
+    Serial.println("==================================================");
+
     loadColorConfigSD(_bus);
-
-    Serial.println("\n=======================================================");
-    Serial.println("  MODO CALIBRADOR EN EJECUCIÓN (TAMA COLOR TUNER)");
-    Serial.println("=======================================================");
-    Serial.println("  Protocolo Serial multidominio disponible:");
-    Serial.println("  TRIM <DOMAIN> <dr> <dg> <db> <bri> <con> <sat>");
-    Serial.println("  DOMAIN <DOMAIN_NAME>");
-    Serial.println("  GET_PROFILES");
-    Serial.println("  SAVE | FACTORY | EXIT");
-    Serial.println("=======================================================\n");
-
-    redibujar();
+    redibujarTodo();
 
     bool running = true;
     while (running) {
@@ -365,28 +639,98 @@ void runColorTuner(Arduino_GFX* gfx, Arduino_DataBus* bus, PNG* pngInstance) {
             upper.toUpperCase();
 
             if (upper == "EXIT" || upper == "REBOOT") {
-                Serial.println("[TUNER] Saliendo del calibrador. Reiniciando hacia TAMA...");
+                Serial.println("[TUNER] Saliendo del calibrador...");
+                if (bgCache) { free(bgCache); bgCache = nullptr; }
                 delay(300);
                 ESP.restart();
                 return;
             }
             else if (upper == "SAVE") {
                 saveColorConfigSD();
-                redibujar();
+                redibujarHud();
             }
             else if (upper == "FACTORY" || upper == "FACTORY_RESET") {
                 factoryResetColorSD(_bus);
-                redibujar();
+                redibujarTodo();
             }
             else if (upper == "GET_PROFILES") {
                 Serial.println("!PROFILES:" + serializeProfilesJson());
             }
+            else if (upper == "GET_RAW_CFG") {
+                Serial.println("!RAW_CFG_START");
+                Serial.print(getRawConfigString());
+                Serial.println("!RAW_CFG_END");
+            }
+            // PROTOCOLO MULTILÍNEA DE RECEPCIÓN DIRECTA
+            else if (upper == "SET_RAW_START" || upper == "!SET_RAW_START") {
+                String rawBuffer = "";
+                while (true) {
+                    String sub = Serial.readStringUntil('\n');
+                    sub.trim();
+                    if (sub == "SET_RAW_END" || sub == "!SET_RAW_END") break;
+                    if (sub.length() > 0) rawBuffer += sub + "\n";
+                }
+                setRawConfigString(rawBuffer);
+                redibujarTodo();
+                Serial.println("[TUNER] Nueva configuracion multiline guardada y aplicada.");
+            }
+            else if (upper == "LIGHTS ON") {
+                previewLightsOn = true;
+                redibujarTodo();
+            }
+            else if (upper == "LIGHTS OFF") {
+                previewLightsOn = false;
+                redibujarTodo();
+            }
+            else if (upper.startsWith("NIGHT_DIM ")) {
+                int val = line.substring(10).toInt();
+                nightDimPercent = constrain(val, 0, 100);
+                redibujarTodo();
+            }
             else if (upper.startsWith("DOMAIN ")) {
                 String dName = line.substring(7);
                 dName.trim();
+                ColorDomain prevDomain = activeTunerDomain;
                 activeTunerDomain = parseColorDomain(dName);
-                redibujar();
-                Serial.printf("[TUNER] Dominio activo: %s\n", DOMAIN_NAMES[activeTunerDomain]);
+                if (activeTunerDomain == DOMAIN_WORLD || prevDomain == DOMAIN_WORLD) {
+                    redibujarTodo();
+                } else {
+                    redibujarHud();
+                }
+            }
+            else if (upper.startsWith("DOM_SWAPRB ")) {
+                int val = line.substring(11).toInt();
+                domainProfiles[activeTunerDomain].swapRB = (val == 1);
+                if (activeTunerDomain == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
+            }
+            else if (upper.startsWith("DOM_INV ")) {
+                int val = line.substring(8).toInt();
+                domainProfiles[activeTunerDomain].invert = (val == 1);
+                if (activeTunerDomain == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
+            }
+            else if (upper.startsWith("COLOR_RESET ")) {
+                String hStr = line.substring(12);
+                hStr.trim();
+                uint16_t cKey = (uint16_t)strtoul(hStr.c_str(), NULL, 16);
+                colorOverrides.erase(cKey);
+                if (activeTunerDomain == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
+            }
+            else if (upper.startsWith("COLOR ")) {
+                char hBuf[16] = {0};
+                int dr = 0, dg = 0, db = 0, bri = 0, con = 0, sat = 0;
+                int count = sscanf(line.c_str() + 6, "%s %d %d %d %d %d %d", hBuf, &dr, &dg, &db, &bri, &con, &sat);
+                if (count == 7) {
+                    uint16_t cKey = (uint16_t)strtoul(hBuf, NULL, 16);
+                    ColorProfile& p = colorOverrides[cKey];
+                    p.deltaR = constrain(dr, -100, 100);
+                    p.deltaG = constrain(dg, -100, 100);
+                    p.deltaB = constrain(db, -100, 100);
+                    p.brightness = constrain(bri, -100, 100);
+                    p.contrast = constrain(con, -100, 100);
+                    p.saturation = constrain(sat, -100, 100);
+
+                    if (activeTunerDomain == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
+                }
             }
             else if (upper.startsWith("TRIM ")) {
                 char dBuf[24] = {0};
@@ -402,7 +746,8 @@ void runColorTuner(Arduino_GFX* gfx, Arduino_DataBus* bus, PNG* pngInstance) {
                     p.brightness = constrain(bri, -100, 100);
                     p.contrast = constrain(con, -100, 100);
                     p.saturation = constrain(sat, -100, 100);
-                    redibujar();
+
+                    if (targetDom == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
                 }
             }
             else if (upper.startsWith("BASE ")) {
@@ -411,39 +756,35 @@ void runColorTuner(Arduino_GFX* gfx, Arduino_DataBus* bus, PNG* pngInstance) {
                     baseR = constrain(r, 0, 255);
                     baseG = constrain(g, 0, 255);
                     baseB = constrain(b, 0, 255);
-                    redibujar();
+                    if (activeTunerDomain == DOMAIN_TAMA) redibujarTama(); else redibujarTodo();
                 }
-            }
-            else if (upper == "RESET") {
-                domainProfiles[activeTunerDomain] = ColorProfile();
-                redibujar();
             }
             else if (upper == "RGB") {
                 currentBGR = false;
                 aplicarHardware();
-                redibujar();
+                redibujarTodo();
             }
             else if (upper == "BGR") {
                 currentBGR = true;
                 aplicarHardware();
-                redibujar();
+                redibujarTodo();
             }
             else if (upper == "INV ON") {
                 currentInv = true;
                 aplicarHardware();
-                redibujar();
+                redibujarTodo();
             }
             else if (upper == "INV OFF") {
                 currentInv = false;
                 aplicarHardware();
-                redibujar();
+                redibujarTodo();
             }
             else if (upper == "SWAP") {
                 swapPngBytes = !swapPngBytes;
                 aplicarHardware();
-                redibujar();
+                redibujarTodo();
             }
         }
-        delay(15);
+        delay(10);
     }
 }

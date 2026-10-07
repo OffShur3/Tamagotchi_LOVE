@@ -95,6 +95,12 @@ public:
     void clearDeathTouch() { deathTouchTriggered = false; }
     bool isConfigModalActive() const { return configHelpModal && configHelpModal->isVisible(); }
 
+    // <--- NUEVO MÉTODO: Fuerza la recarga de la textura actual de la mascota
+    void forceTextureUpdate() {
+        currentTexturePath = ""; 
+        updateSpriteTexture();
+    }
+
 private:
     Pet& pet;
     EditPlayerNameCallback onEditPlayerName = nullptr;

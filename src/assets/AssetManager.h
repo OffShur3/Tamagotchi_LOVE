@@ -5,7 +5,7 @@
 #include <string>
 #include <memory>
 #include <FS.h>
-#include <PNGdec.h> // Incluir para la referencia de clase
+#include <PNGdec.h>
 
 class AssetManager {
 public:
@@ -15,24 +15,19 @@ public:
         return instance;
     }
 
-    // Configurar el sistema de archivos
-    void setFileSystem(fs::FS* fs) {
-        fileSystem = fs;
-    }
-
-    // Inyectar el decodificador PNG estático global
-    void setPNG(PNG* p) {
-        png = p;
-    }
+    void setFileSystem(fs::FS* fs) { fileSystem = fs; }
+    void setPNG(PNG* p) { png = p; }
 
     std::shared_ptr<Texture> getTexture(const std::string& filepath);
+    
     void clearUnused();
+    void clearAll() { cache.clear(); } // <--- NUEVO MÉTODO
 
 private:
     AssetManager() : fileSystem(nullptr), png(nullptr) {}
     
     fs::FS* fileSystem;
-    PNG* png; // Puntero al decodificador estático global
+    PNG* png;
     std::unordered_map<std::string, std::shared_ptr<Texture>> cache;
 
     std::shared_ptr<Texture> loadFromFile(const std::string& path);

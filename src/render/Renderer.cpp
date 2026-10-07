@@ -1,6 +1,7 @@
 // src/render/Renderer.cpp
 #include "Renderer.h"
 #include "Blend.h"
+#include "../ColorTuner.h"
 #include <string.h>
 #include <Arduino.h>
 
@@ -173,12 +174,10 @@ void Renderer::render(const std::vector<std::shared_ptr<RenderObject>>& objects)
             }
         }
     }
-    // --- EFECTO NOCHE / LUZ APAGADA (Atenuación al 30% de luminosidad) ---
+    // --- EFECTO NOCHE / LUZ APAGADA DINÁMICO ---
     if (isNightMode) {
         for (uint32_t i = 0; i < (uint32_t)(width * height); ++i) {
-            uint16_t p = framebuffer[i];
-            // Reducción rápida de brillo en RGB565 sin gastar memoria RAM
-            framebuffer[i] = ((p >> 2) & 0x39E7);
+            framebuffer[i] = applyNightDim565(framebuffer[i]);
         }
     }
 

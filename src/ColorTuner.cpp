@@ -5,6 +5,26 @@
 #include <math.h>
 
 namespace {
+    // Dominio y color activo
+    static ColorDomain activeTunerDomain = DOMAIN_TAMA;
+    static uint8_t baseR = 220, baseG = 20, baseB = 20;
+
+    // --- NUEVO: Perfil Global ---
+    static ColorProfile globalProfile;
+
+    // --- NUEVO: Función para combinar perfiles ---
+    static ColorProfile combineProfiles(const ColorProfile& global, const ColorProfile& specific) {
+        ColorProfile res;
+        res.deltaR = constrain(global.deltaR + specific.deltaR, -100, 100);
+        res.deltaG = constrain(global.deltaG + specific.deltaG, -100, 100);
+        res.deltaB = constrain(global.deltaB + specific.deltaB, -100, 100);
+        res.brightness = constrain(global.brightness + specific.brightness, -100, 100);
+        res.contrast = constrain(global.contrast + specific.contrast, -100, 100);
+        res.saturation = constrain(global.saturation + specific.saturation, -100, 100);
+        res.swapRB = global.swapRB || specific.swapRB; 
+        res.invert = global.invert || specific.invert;
+        return res;
+    }
     static Arduino_GFX* _gfx = nullptr;
     static Arduino_DataBus* _bus = nullptr;
     static PNG* _png = nullptr;
@@ -171,9 +191,49 @@ uint16_t applyNightDim565(uint16_t c565) {
     return (r << 11) | (g << 5) | b;
 }
 
+ColorProfile& getGlobalProfile() { return globalProfile; }
+
 bool colorTunerHasEffect(ColorDomain domain) {
     if (domain >= DOMAIN_COUNT) return false;
-    return (!domainProfiles[domain].isNeutral() || !colorOverrides.empty() || swapPngBytes);
+    return (!globalProfile.isNeutral() || !domainProfiles[domain].isNeutral() || !colorOverrides.empty() || swapPngBytes);
+}
+
+uint16_t colorTunerApply(ColorDomain domain, uint8_t r, uint8_t g, uint8_t b) {
+    uint16_t raw565 = rgbTo565(r, g, b);
+    auto it = colorOverrides.find(raw565);
+    uint16_t c565;
+    if (it != colorOverrides.end()) {
+        c565 = applyProfileToRgb(combineProfiles(globalProfile, it->second), r, g, b);
+    } else {
+        if (domain >= DOMAIN_COUNT) domain = DOMAIN_WORLD;
+        c565 = applyProfileToRgb(combineProfiles(globalProfile, domainProfiles[domain]), r, g, b);
+    }
+
+    if (!previewLightsOn) c565 = applyNightDim565(c565);
+    if (swapPngBytes) c565 = __builtin_bswap16(c565);
+    return c565;
+}
+
+uint16_t colorTunerCorrect565(ColorDomain domain, uint16_t c565) {
+    uint16_t key = c565;
+    if (swapPngBytes) c565 = __builtin_bswap16(c565);
+
+    uint8_t r = ((c565 >> 11) & 0x1F) * 255 / 31;
+    uint8_t g = ((c565 >> 5)  & 0x3F) * 255 / 63;
+    uint8_t b = (c565 & 0x1F)        * 255 / 31;
+
+    auto it = colorOverrides.find(key);
+    uint16_t res;
+    if (it != colorOverrides.end()) {
+        res = applyProfileToRgb(combineProfiles(globalProfile, it->second), r, g, b);
+    } else {
+        if (domain >= DOMAIN_COUNT) domain = DOMAIN_WORLD;
+        res = applyProfileToRgb(combineProfiles(globalProfile, domainProfiles[domain]), r, g, b);
+    }
+
+    if (!previewLightsOn) res = applyNightDim565(res);
+    if (swapPngBytes) res = __builtin_bswap16(res);
+    return res;
 }
 
 uint16_t colorTunerApply(ColorDomain domain, uint8_t r, uint8_t g, uint8_t b) {
@@ -416,7 +476,13 @@ String getRawConfigString() {
     out += "global:bgr=" + String(currentBGR ? 1 : 0) + 
            ";inv=" + String(currentInv ? 1 : 0) + 
            ";swap=" + String(swapPngBytes ? 1 : 0) + 
-           ";night=" + String((int)nightDimPercent) + "\n";
+           ";night=" + String((int)nightDimPercent) + 
+           ";dr=" + String((int)globalProfile.deltaR) +
+           ";dg=" + String((int)globalProfile.deltaG) +
+           ";db=" + String((int)globalProfile.deltaB) +
+           ";bri=" + String((int)globalProfile.brightness) +
+           ";con=" + String((int)globalProfile.contrast) +
+           ";sat=" + String((int)globalProfile.saturation) + "\n";
 
     for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
         const ColorProfile& p = domainProfiles[i];
@@ -467,12 +533,13 @@ String serializeProfilesJson() {
     for (uint8_t i = 0; i < DOMAIN_COUNT; ++i) {
         const ColorProfile& p = domainProfiles[i];
         json += "\"" + String(DOMAIN_NAMES[i]) + "\":{";
-        json += "\"dr\":" + String((int)p.deltaR) + ",";
-        json += "\"dg\":" + String((int)p.deltaG) + ",";
-        json += "\"db\":" + String((int)p.deltaB) + ",";
-        json += "\"bri\":" + String((int)p.brightness) + ",";
-        json += "\"con\":" + String((int)p.contrast) + ",";
-        json += "\"sat\":" + String((int)p.saturation) + ",";
+        json += "\"global_profile\":{";
+        json += "\"dr\":" + String((int)globalProfile.deltaR) + ",";
+        json += "\"dg\":" + String((int)globalProfile.deltaG) + ",";
+        json += "\"db\":" + String((int)globalProfile.deltaB) + ",";
+        json += "\"bri\":" + String((int)globalProfile.brightness) + ",";
+        json += "\"con\":" + String((int)globalProfile.contrast) + ",";
+        json += "\"sat\":" + String((int)globalProfile.saturation) + "},";
         json += "\"swapRB\":" + String(p.swapRB ? 1 : 0) + ",";
         json += "\"inv\":" + String(p.invert ? 1 : 0) + "}";
         if (i < DOMAIN_COUNT - 1) json += ",";
@@ -530,10 +597,17 @@ void loadColorConfigSD(Arduino_DataBus* bus) {
                 if (eq != -1) {
                     String k = token.substring(0, eq);
                     String v = token.substring(eq + 1);
+                    
                     if (k.equalsIgnoreCase("bgr")) currentBGR = (v.toInt() == 1);
                     else if (k.equalsIgnoreCase("inv")) currentInv = (v.toInt() == 1);
                     else if (k.equalsIgnoreCase("swap")) swapPngBytes = (v.toInt() == 1);
                     else if (k.equalsIgnoreCase("night")) nightDimPercent = constrain(v.toInt(), 0, 100);
+                    else if (k.equalsIgnoreCase("dr")) globalProfile.deltaR = constrain(v.toInt(), -100, 100);
+                    else if (k.equalsIgnoreCase("dg")) globalProfile.deltaG = constrain(v.toInt(), -100, 100);
+                    else if (k.equalsIgnoreCase("db")) globalProfile.deltaB = constrain(v.toInt(), -100, 100);
+                    else if (k.equalsIgnoreCase("bri")) globalProfile.brightness = constrain(v.toInt(), -100, 100);
+                    else if (k.equalsIgnoreCase("con")) globalProfile.contrast = constrain(v.toInt(), -100, 100);
+                    else if (k.equalsIgnoreCase("sat")) globalProfile.saturation = constrain(v.toInt(), -100, 100);
                 }
                 start = semi + 1;
             }
@@ -686,6 +760,19 @@ void runColorTuner(Arduino_GFX* gfx, Arduino_DataBus* bus, PNG* pngInstance) {
                 int val = line.substring(10).toInt();
                 nightDimPercent = constrain(val, 0, 100);
                 redibujarTodo();
+            }
+            else if (upper.startsWith("GLOBAL_TRIM ")) {
+                int dr = 0, dg = 0, db = 0, bri = 0, con = 0, sat = 0;
+                int count = sscanf(line.c_str() + 12, "%d %d %d %d %d %d", &dr, &dg, &db, &bri, &con, &sat);
+                if (count == 6) {
+                    globalProfile.deltaR = constrain(dr, -100, 100);
+                    globalProfile.deltaG = constrain(dg, -100, 100);
+                    globalProfile.deltaB = constrain(db, -100, 100);
+                    globalProfile.brightness = constrain(bri, -100, 100);
+                    globalProfile.contrast = constrain(con, -100, 100);
+                    globalProfile.saturation = constrain(sat, -100, 100);
+                    redibujarTodo();
+                }
             }
             else if (upper.startsWith("DOMAIN ")) {
                 String dName = line.substring(7);

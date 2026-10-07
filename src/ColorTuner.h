@@ -32,6 +32,8 @@ struct ColorProfile {
     }
 };
 
+ColorProfile& getGlobalProfile();
+
 // Pipeline de graduación de color perceptivo desacoplado
 uint16_t colorTunerApply(ColorDomain domain, uint8_t r, uint8_t g, uint8_t b);
 uint16_t colorTunerCorrect565(ColorDomain domain, uint16_t c565);

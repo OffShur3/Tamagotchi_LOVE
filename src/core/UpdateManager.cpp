@@ -422,10 +422,21 @@ bool UpdateManager::performFirmwareUpdate() {
     return false;
 }
 
+// Función auxiliar recursiva para crear carpetas
+static void createRecursiveDirs(const String& fullPath) {
+    int pos = 0;
+    while ((pos = fullPath.indexOf('/', pos + 1)) != -1) {
+        String subPath = fullPath.substring(0, pos);
+        if (subPath.length() > 0 && !SD_MMC.exists(subPath.c_str())) {
+            SD_MMC.mkdir(subPath.c_str());
+        }
+    }
+}
+
 void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
     File tarFile = SD_MMC.open(tarPath, "r");
     if (!tarFile) {
-        Serial.println("[TAR] ESP_FAIL. File Imposible Mapearlo y localizar Muestra !");
+        Serial.println("[TAR] ESP_FAIL. Archivo TAR no encontrado!");
         return;
     }
 
@@ -433,15 +444,12 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
     int count = 0;
 
     while (tarFile.read(buffer, 512) == 512) {
+        // Verificar fin de archivo (bloque de ceros)
         bool allZero = true;
         for (int i = 0; i < 512; i++) {
             if (buffer[i] != 0) { allZero = false; break; }
         }
         if (allZero) break; 
-
-        char filename[101];
-        memcpy(filename, buffer, 100);
-        filename[100] = '\0';
 
         char typeflag = buffer[156];
         
@@ -451,12 +459,41 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
                 fileSize = fileSize * 8 + (buffer[124 + i] - '0');
         }
 
-        if (strlen(filename) == 0) continue;
-
-        String fileStr = String(filename);
-        if (fileStr.startsWith("./")) {
-            fileStr = fileStr.substring(2); 
+        // Ignorar cabeceras extendidas LEYENDO en lugar de SEEK (evita bug de corrupción SD_MMC)
+        if (typeflag == 'x' || typeflag == 'g' || typeflag == 'L' || typeflag == 'K') {
+            long pad = (512 - (fileSize % 512)) % 512;
+            long totalSkip = fileSize + pad;
+            while (totalSkip > 0) {
+                int c = totalSkip > 512 ? 512 : totalSkip;
+                tarFile.read(buffer, c);
+                totalSkip -= c;
+            }
+            continue;
         }
+
+        String fullName = "";
+        char magic[6];
+        memcpy(magic, buffer + 257, 5);
+        magic[5] = '\0';
+        
+        if (strncmp(magic, "ustar", 5) == 0) {
+            char prefix[156];
+            memcpy(prefix, buffer + 345, 155);
+            prefix[155] = '\0';
+            if (strlen(prefix) > 0) {
+                fullName += String(prefix);
+                if (!fullName.endsWith("/")) fullName += "/";
+            }
+        }
+        
+        char filename[101];
+        memcpy(filename, buffer, 100);
+        filename[100] = '\0';
+        fullName += String(filename);
+
+        String fileStr = fullName;
+        if (fileStr.startsWith("./")) fileStr = fileStr.substring(2); 
+        if (fileStr.startsWith("/")) fileStr = fileStr.substring(1); 
         if (fileStr.length() == 0) continue; 
 
         String fullPath = String(destDir);
@@ -464,39 +501,50 @@ void UpdateManager::extractTar(const char* tarPath, const char* destDir) {
         fullPath += fileStr;
 
         if (typeflag == '5' || (fileSize == 0 && fullPath.endsWith("/"))) { 
-            SD_MMC.mkdir(fullPath.c_str());
+            createRecursiveDirs(fullPath);
+            if (!SD_MMC.exists(fullPath.c_str())) SD_MMC.mkdir(fullPath.c_str());
         } else { 
-            int lastSlash = fullPath.lastIndexOf('/');
-            if (lastSlash != -1) {
-                SD_MMC.mkdir(fullPath.substring(0, lastSlash).c_str());
-            }
+            createRecursiveDirs(fullPath);
 
             File outFile = SD_MMC.open(fullPath.c_str(), "w");
             if (outFile) {
                 long remaining = fileSize;
                 while (remaining > 0) {
                     int chunk = remaining > 512 ? 512 : remaining;
-                    tarFile.read(buffer, chunk); 
-                    outFile.write(buffer, chunk);
-                    remaining -= chunk;
+                    int bytesRead = tarFile.read(buffer, chunk); 
+                    if (bytesRead > 0) {
+                        outFile.write(buffer, bytesRead);
+                        remaining -= bytesRead;
+                    } else {
+                        break; 
+                    }
                 }
                 outFile.close();
                 count++;
-                Serial.printf("[DEBUG-OTA] Compilado Estatico Integrado y Abrochado Local -> : %s\n", fullPath.c_str());
+                Serial.printf("[DEBUG-OTA] Extraido Ok -> : %s\n", fullPath.c_str());
             } else {
-                long blocksToSkip = (fileSize + 511) / 512;
-                tarFile.seek(tarFile.position() + blocksToSkip * 512);
+                Serial.printf("[DEBUG-OTA] FALLO AL CREAR: %s\n", fullPath.c_str());
+                long pad = (512 - (fileSize % 512)) % 512;
+                long totalSkip = fileSize + pad;
+                while (totalSkip > 0) {
+                    int c = totalSkip > 512 ? 512 : totalSkip;
+                    tarFile.read(buffer, c);
+                    totalSkip -= c;
+                }
                 continue; 
             }
             
+            // Alinear leyendo el padding (NO USAR SEEK, ROMPE EL STREAM DE LA SD)
             long padding = (512 - (fileSize % 512)) % 512;
-            if (padding > 0) {
-                tarFile.seek(tarFile.position() + padding);
+            while (padding > 0) {
+                int pChunk = padding > 512 ? 512 : padding;
+                tarFile.read(buffer, pChunk);
+                padding -= pChunk;
             }
         }
     }
     tarFile.close();
-    Serial.printf("\n[DEBUG-OTA] Limpieza De Carpetas Comprimidas Terminó. Despliege Local 100%%: %d Directorios/File\n", count);
+    Serial.printf("\n[DEBUG-OTA] Limpieza De Carpetas Comprimidas Terminó. Despliegue Local 100%%: %d Directorios/File\n", count);
 }
 
 void UpdateManager::writeVersionFile(const String& version) {

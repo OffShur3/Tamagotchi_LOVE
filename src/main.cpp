@@ -751,14 +751,6 @@ void loop() {
             delay(500);
             ESP.restart();
         }
-        else if (cmd == "TUNECOLOURS") {
-            if (!debugMode) {
-                Serial.println("[KERNEL] Modo debug inactivo. Primero envía el comando 'DEBUG' o crea /config/debug.txt en la SD.");
-            } else {
-                Serial.println("[KERNEL] Entrando al módulo ColorTuner...");
-                runColorTuner(gfx, bus, &png);
-            }
-        }
         else if (cmd.startsWith("STIM ")) {
             int firstSpace = cmd.indexOf(' ');
             int secondSpace = cmd.indexOf(' ', firstSpace + 1);

@@ -93,6 +93,7 @@ public:
     uint8_t getPoopCount() const { return poopCount; }
     bool isLightOn() const { return lightsOn; }
     uint32_t getAge() const { return (uint32_t)age; }
+    uint32_t getDnaSeed() const { return dnaSeed; }
 
     String getSpritePath() const;
 
@@ -100,6 +101,7 @@ private:
     String species = "tiernito";
     PetStage stage = PetStage::Egg;
     PetState state = PetState::Idle;
+    uint32_t dnaSeed = 0;
 
     float hunger = 100.0f;
     float happiness = 100.0f;

@@ -2,6 +2,7 @@
 #include "AssetManager.h"
 #include "../ColorTuner.h"
 #include <Arduino.h>
+#include <math.h> // Para senos y cosenos
 
 struct PNGUserContext {
     uint16_t* dest_pixels;
@@ -9,7 +10,37 @@ struct PNGUserContext {
     uint16_t width;
     PNG* png;
     ColorDomain domain;
+    uint32_t dnaSeed; // Inyectar semilla al decodificador
 };
+
+// Algoritmo de rotación de matiz (Visual DNA)
+static void applyVisualDNA(uint8_t& r, uint8_t& g, uint8_t& b, uint32_t seed) {
+    if (seed == 0) return;
+    
+    // Proteger colores neutros: contornos (negros), blanco puro y grises puros
+    if ((r < 40 && g < 40 && b < 40) || (r > 220 && g > 220 && b > 220)) return;
+    if (abs(r - g) < 15 && abs(g - b) < 15 && abs(r - b) < 15) return;
+
+    // Extraer ángulo pseudorandom de la semilla
+    float angle = (seed % 360) * (PI / 180.0f);
+    float cosA = cos(angle);
+    float sinA = sin(angle);
+
+    // Matriz de preservación de luminancia Luma rápida
+    float matrix[3][3] = {
+        { cosA + (1.0f - cosA) / 3.0f, 1.0f/3.0f * (1.0f - cosA) - sqrtf(1.0f/3.0f) * sinA, 1.0f/3.0f * (1.0f - cosA) + sqrtf(1.0f/3.0f) * sinA },
+        { 1.0f/3.0f * (1.0f - cosA) + sqrtf(1.0f/3.0f) * sinA, cosA + 1.0f/3.0f * (1.0f - cosA), 1.0f/3.0f * (1.0f - cosA) - sqrtf(1.0f/3.0f) * sinA },
+        { 1.0f/3.0f * (1.0f - cosA) - sqrtf(1.0f/3.0f) * sinA, 1.0f/3.0f * (1.0f - cosA) + sqrtf(1.0f/3.0f) * sinA, cosA + 1.0f/3.0f * (1.0f - cosA) }
+    };
+
+    float newR = r * matrix[0][0] + g * matrix[0][1] + b * matrix[0][2];
+    float newG = r * matrix[1][0] + g * matrix[1][1] + b * matrix[1][2];
+    float newB = r * matrix[2][0] + g * matrix[2][1] + b * matrix[2][2];
+
+    r = (uint8_t)constrain(newR, 0.0f, 255.0f);
+    g = (uint8_t)constrain(newG, 0.0f, 255.0f);
+    b = (uint8_t)constrain(newB, 0.0f, 255.0f);
+}
 
 // Deduce el dominio de renderizado a partir del path del asset
 static ColorDomain deduceDomain(const std::string& path) {
@@ -42,6 +73,11 @@ int PNGDrawCallback(PNGDRAW *pDraw) {
             uint8_t a = src[3];
             src += 4;
 
+            // Aplicar DNA si es una textura de Mascota
+            if (domain == DOMAIN_TAMA && ctx->dnaSeed != 0) {
+                applyVisualDNA(r, g, b, ctx->dnaSeed);
+            }
+
             if (hasTuning) {
                 dest_row[x] = colorTunerApply(domain, r, g, b);
             } else {
@@ -55,10 +91,22 @@ int PNGDrawCallback(PNGDRAW *pDraw) {
     } else {
         ctx->png->getLineAsRGB565(pDraw, dest_row, PNG_RGB565_LITTLE_ENDIAN, 0);
 
-        if (hasTuning) {
-            for (int x = 0; x < pDraw->iWidth; ++x) {
-                dest_row[x] = colorTunerCorrect565(domain, dest_row[x]);
+        for (int x = 0; x < pDraw->iWidth; ++x) {
+            uint16_t c565 = dest_row[x];
+            
+            // Expandir, mutar y contraer si es Indexado/565 nativo
+            if (domain == DOMAIN_TAMA && ctx->dnaSeed != 0) {
+                uint8_t r = ((c565 >> 11) & 0x1F) * 255 / 31;
+                uint8_t g = ((c565 >> 5) & 0x3F) * 255 / 63;
+                uint8_t b = (c565 & 0x1F) * 255 / 31;
+                applyVisualDNA(r, g, b, ctx->dnaSeed);
+                c565 = ((r & 0xF8) << 8) | ((g & 0xFC) << 3) | (b >> 3);
             }
+
+            if (hasTuning) {
+                c565 = colorTunerCorrect565(domain, c565);
+            }
+            dest_row[x] = c565;
         }
 
         if (ctx->dest_alpha) {
@@ -90,14 +138,23 @@ int32_t PNGSeekCallback(PNGFILE *handle, int32_t position) {
 }
 
 std::shared_ptr<Texture> AssetManager::getTexture(const std::string& filepath) {
-    auto it = cache.find(filepath);
+    std::string cacheKey = filepath;
+    
+    // Evitar colisiones en el cache anexando el DNA a la clave del mapa
+    if (activeDnaSeed != 0 && deduceDomain(filepath) == DOMAIN_TAMA) {
+        char seedStr[16];
+        snprintf(seedStr, sizeof(seedStr), "_%08X", activeDnaSeed);
+        cacheKey += seedStr;
+    }
+
+    auto it = cache.find(cacheKey);
     if (it != cache.end()) {
         return it->second;
     }
 
     auto texture = loadFromFile(filepath);
     if (texture) {
-        cache[filepath] = texture;
+        cache[cacheKey] = texture; // Guardar bajo la clave mutada
     }
     return texture;
 }
@@ -156,7 +213,8 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
         memset(tex->alpha, 255, alphaBytes);
     }
 
-    PNGUserContext ctx = { tex->pixels, tex->alpha, tex->width, png, deduceDomain(path) };
+    // Inyectar la semilla al callback
+    PNGUserContext ctx = { tex->pixels, tex->alpha, tex->width, png, deduceDomain(path), activeDnaSeed };
     rc = png->decode(&ctx, 0);
     
     png->close();
@@ -192,7 +250,7 @@ bool AssetManager::loadPNGDirectToBuffer(const std::string& path, uint16_t* dest
         return false;
     }
 
-    PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png, deduceDomain(path) };
+        PNGUserContext ctx = { destBuffer, nullptr, (uint16_t)png->getWidth(), png, deduceDomain(path), 0 };
     rc = png->decode(&ctx, 0);
     
     png->close();

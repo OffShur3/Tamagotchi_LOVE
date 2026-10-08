@@ -17,17 +17,22 @@ public:
 
     void setFileSystem(fs::FS* fs) { fileSystem = fs; }
     void setPNG(PNG* p) { png = p; }
+    
+    // Asignación de DNA Seed para generación procedural
+    void setActiveDnaSeed(uint32_t seed) { activeDnaSeed = seed; }
+    uint32_t getActiveDnaSeed() const { return activeDnaSeed; }
 
     std::shared_ptr<Texture> getTexture(const std::string& filepath);
     
     void clearUnused();
-    void clearAll() { cache.clear(); } // <--- NUEVO MÉTODO
+    void clearAll() { cache.clear(); } 
 
 private:
-    AssetManager() : fileSystem(nullptr), png(nullptr) {}
+    AssetManager() : fileSystem(nullptr), png(nullptr), activeDnaSeed(0) {}
     
     fs::FS* fileSystem;
     PNG* png;
+    uint32_t activeDnaSeed; // <-- NUEVO
     std::unordered_map<std::string, std::shared_ptr<Texture>> cache;
 
     std::shared_ptr<Texture> loadFromFile(const std::string& path);

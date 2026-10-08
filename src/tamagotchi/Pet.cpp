@@ -67,6 +67,7 @@ void Pet::printStats() const {
     Serial.println("       TAMA PET DIAGNOSTICS      ");
     Serial.println("=================================");
     Serial.printf("  Especie:     %s\n", species.c_str());
+    Serial.printf("  DNA Seed:    0x%08X\n", dnaSeed);
     Serial.printf("  Etapa:       %s\n", stageToString(stage).c_str());
     Serial.printf("  Estado:      %s\n", stateToString(state).c_str());
     Serial.printf("  Hambre:      %.1f / 100\n", hunger);
@@ -421,15 +422,33 @@ void Pet::accelerateAge(float seconds) {
 String Pet::getSpritePath() const {
     String folder = stageToString(stage);
     String anim   = stateToString(state);
+    String path;
 
-    String target = "/tama/sprites/base/" + species + "/" + folder + "/" + anim + ".png";
-    if (SD_MMC.exists(target)) return target;
+    // 1. Coincidencia exacta
+    path = "/tama/sprites/base/" + species + "/" + folder + "/" + anim + ".png";
+    if (SD_MMC.exists(path)) return path;
 
-    String tiernitoTarget = "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
-    if (SD_MMC.exists(tiernitoTarget)) return tiernitoTarget;
+    // 2. Coincidencia exacta (base tiernito)
+    path = "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
+    if (SD_MMC.exists(path)) return path;
 
-    String fallbackIdle = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
-    if (SD_MMC.exists(fallbackIdle)) return fallbackIdle;
+    // 3. Fallback a IDLE de la etapa actual
+    path = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
+    if (SD_MMC.exists(path)) return path;
+    
+    path = "/tama/sprites/base/tiernito/" + folder + "/idle.png";
+    if (SD_MMC.exists(path)) return path;
+
+    // 4. Fallback a CHILD si la etapa Adulto/Anciano aún no está dibujada
+    path = "/tama/sprites/base/" + species + "/child/idle.png";
+    if (SD_MMC.exists(path)) return path;
+
+    path = "/tama/sprites/base/tiernito/child/idle.png";
+    if (SD_MMC.exists(path)) return path;
+
+    // 5. Fallback final universal a BEBE
+    path = "/tama/sprites/base/" + species + "/bebe/idle.png";
+    if (SD_MMC.exists(path)) return path;
 
     return "/tama/sprites/base/tiernito/bebe/idle.png";
 }
@@ -475,6 +494,11 @@ bool Pet::load() {
     lightsOn      = doc["lights"] | true;
     age           = doc["age"] | 0.0f;
     lastTimestamp = doc["lastTimestamp"] | 0;
+    if (doc.containsKey("dna")) { // Cargar ADN o generar uno si es un perfil viejo
+        dnaSeed = doc["dna"];
+    } else {
+        dnaSeed = esp_random(); 
+    }
 
     return true;
 }
@@ -493,6 +517,7 @@ bool Pet::save() {
     doc["lights"]        = lightsOn;
     doc["age"]           = age;
     doc["lastTimestamp"] = (uint32_t)time(NULL);
+    doc["dna"]           = dnaSeed; // Guardar ADN
 
     SD_MMC.mkdir("/config");
     File f = SD_MMC.open("/config/save.json", "w");
@@ -510,6 +535,7 @@ void Pet::reset() {
     poopCount = 0; lightsOn = true; age = 0.0f; actionTimer = 0.0f; poopTimer = 0.0f;
     digestiveTransitTimer = 0.0f; digesting = false; poopExposureTimer = 0.0f;
     lastTimestamp = (uint32_t)time(NULL);
+    dnaSeed = esp_random(); // Nuevo ADN al reiniciar partida
     save();
 }
 

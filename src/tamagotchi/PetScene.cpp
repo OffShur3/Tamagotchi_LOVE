@@ -330,6 +330,8 @@ void PetScene::updateSpriteTexture() {
     if (newPath == currentTexturePath && petSprite != nullptr) return;
 
     currentTexturePath = newPath;
+    // Inyectar la semilla única de esta mascota al gestor de Texturas
+    AssetManager::getInstance().setActiveDnaSeed(pet.getDnaSeed());
     auto tex = AssetManager::getInstance().getTexture(newPath.c_str());
 
     if (tex) {

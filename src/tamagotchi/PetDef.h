@@ -21,6 +21,15 @@ enum class PetState {
     Dead
 };
 
+struct PetGenome {
+    float metabolismRate = 1.0f;
+    float socialNeed = 1.0f;
+    float resilience = 1.0f;
+    float sleepPacing = 1.0f;
+    String personalityTag = "Incubando...";
+};
+
+
 inline String stageToString(PetStage stage) {
     switch (stage) {
         case PetStage::Egg:    return "huevo";

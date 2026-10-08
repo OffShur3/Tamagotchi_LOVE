@@ -21,6 +21,7 @@ public:
     virtual ~IBrain() = default;
 
     virtual void init() = 0;
+    virtual void applyGenome(const PetGenome& genome) = 0;
     virtual void update(float dt, const PetSensoryInput& input) = 0;
     virtual void emitReward(float amount) = 0;
     virtual PetState getDecision() const = 0;

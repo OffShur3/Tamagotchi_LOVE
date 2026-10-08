@@ -10,7 +10,7 @@ class ConfigHelpModal : public GenericModal {
 public:
     using EditNameCallback = std::function<void()>;
 
-    ConfigHelpModal() : GenericModal(6, 16, 160, 288) {
+    ConfigHelpModal(Pet& petRef) : GenericModal(6, 16, 160, 288), pet(petRef) {
         currentTab = 0;
         scrollY = 0;
         maxScrollY = 180;
@@ -78,6 +78,7 @@ public:
     }
 
 protected:
+    Pet& pet;
     uint8_t currentTab = 0;
     int16_t scrollY = 0;
     int16_t maxScrollY = 180;
@@ -239,8 +240,12 @@ private:
             TextUtil::drawWrappedText(ctx, startX, curY, "IDENTIDAD:", cAccent, 144, 12, clipTop, clipBottom);
             curY += 11;
             TextUtil::drawWrappedText(ctx, startX, curY, ("DUENO: " + owner).c_str(), cText, 144, 12, clipTop, clipBottom);
-            curY += 15;
-
+            curY += 14;
+            
+            // Renderizar la Personalidad en la UI
+            String pTag = (pet.getStage() == PetStage::Egg) ? "Incubando..." : pet.getGenome().personalityTag;
+            TextUtil::drawWrappedText(ctx, startX, curY, ("PERSONALIDAD: " + pTag).c_str(), cText, 144, 22, clipTop, clipBottom);
+            curY += 18;
             int16_t btnBX = startX + 2;
             int16_t btnBY = curY;
             int16_t btnBW = 136;

@@ -5,6 +5,7 @@
 class SimpleReactiveBrain : public IBrain {
 public:
     void init() override { decision = PetState::Idle; }
+    void applyGenome(const PetGenome& genome) override {} // Implementación vacía para el bot simple
 
     void update(float dt, const PetSensoryInput& in) override {
         if (!in.lightsOn) {

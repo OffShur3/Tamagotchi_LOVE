@@ -79,6 +79,32 @@ void Brain::setupConnectome() {
     synapses.push_back(Synapse(M_LOVE,    M_LOVE,   0.25f));
 }
 
+void Brain::applyGenome(const PetGenome& genome) {
+    // 1. Restaurar los valores base limpios antes de aplicar el genoma
+    setupConnectome();
+
+    // 2. Escalar Umbrales Neuronales
+    // Un metabolismo alto reduce el umbral de hambre (se dispara antes)
+    neurons[S_HUNGER].threshold *= (1.0f / genome.metabolismRate);
+    
+    // Una necesidad social alta reduce el umbral de aburrimiento
+    neurons[S_BOREDOM].threshold *= (1.0f / genome.socialNeed);
+    
+    // Una alta resiliencia aumenta los umbrales de dolor y enfermedad (las soporta mejor)
+    neurons[S_PAIN].threshold *= genome.resilience;
+    neurons[M_SICK].threshold *= genome.resilience;
+    
+    // Ritmo de sueño altera cuán rápido se cansa
+    neurons[M_SLEEP].threshold *= (1.0f / genome.sleepPacing);
+
+    // 3. Escalar Sinapsis
+    for (auto& syn : synapses) {
+        if (syn.preIndex == S_TOUCH && syn.postIndex == M_LOVE) {
+            syn.weight *= genome.socialNeed; // Mayor necesidad social = Más placer por las caricias
+        }
+    }
+}
+
 void Brain::emitReward(float amount) {
     if (isEggStage) return;
     dopamine = constrain(dopamine + amount, 0.0f, 2.0f);

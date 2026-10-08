@@ -24,13 +24,16 @@ void PetScene::enter() {
     addObject(messagePopup);
     MessageManager::getInstance().init();
 
-    configHelpModal = std::make_shared<ConfigHelpModal>();
+    configHelpModal = std::make_shared<ConfigHelpModal>(pet);
     configHelpModal->setOnEditNameRequested([this]() {
         if (onEditPlayerName) {
             onEditPlayerName();
         }
     });
     addObject(configHelpModal);
+
+    personalityRevealModal = std::make_shared<PersonalityRevealModal>();
+    addObject(personalityRevealModal);
 
     auto uiTex = AssetManager::getInstance().getTexture("/tama/ui/icons_ui.png");
     if (uiTex) {
@@ -93,6 +96,7 @@ void PetScene::exit() {
     evolutionOverlay = nullptr;
     messagePopup = nullptr;
     configHelpModal = nullptr;
+    personalityRevealModal = nullptr;
 }
 
 void PetScene::startAnimationTest() {
@@ -167,6 +171,7 @@ void PetScene::processAnimationTest(float dt) {
 }
 
 void PetScene::startEvolutionSequence(PetStage oldStage) {
+    evolutionOldStage = oldStage;
     isEvolving = true;
     evolutionTimer = 0.0f;
     flickerTimer = 0.0f;
@@ -322,6 +327,10 @@ void PetScene::processEvolutionSequence(float dt) {
         }
 
         Serial.println("[EVOLUCIÓN GBA] Secuencia completada con exito!");
+
+        if (evolutionOldStage == PetStage::Egg && personalityRevealModal) {
+            personalityRevealModal->showReveal(pet.getGenome());
+        }
     }
 }
 
@@ -401,6 +410,12 @@ void PetScene::update(float dt) {
         telemetryBroadcastTimer = 0.0f;
         if (pet.getBrain()) {
             Serial.println("!BRAIN:" + pet.getBrain()->getTelemetryJson());
+            Serial.printf("!GENOME:{\"tag\":\"%s\",\"metab\":%.2f,\"soc\":%.2f,\"res\":%.2f,\"slp\":%.2f}\n",
+                          pet.getGenome().personalityTag.c_str(),
+                          pet.getGenome().metabolismRate,
+                          pet.getGenome().socialNeed,
+                          pet.getGenome().resilience,
+                          pet.getGenome().sleepPacing);
         }
     }
 
@@ -436,15 +451,18 @@ void PetScene::update(float dt) {
 
                 if (pet.getState() == PetState::Sick || pet.getHealth() < 40.0f) {
                     MessageManager::getInstance().requestAiMessage("sick", 
-                        "Salud critica (" + String((int)pet.getHealth()) + "%). Necesita medicina urgente.");
+                        "Salud critica (" + String((int)pet.getHealth()) + "%). Necesita medicina urgente.",
+                        pet.getGenome().personalityTag);
                 }
                 else if (pet.getHunger() < 30.0f) {
                     MessageManager::getInstance().requestAiMessage("eating", 
-                        "Hambre critica (" + String((int)pet.getHunger()) + "%). Deseo de comida.");
+                        "Hambre critica (" + String((int)pet.getHunger()) + "%). Deseo de comida.",
+                        pet.getGenome().personalityTag);
                 }
                 else if (pet.getHappiness() > 70.0f && pet.getHealth() >= 60.0f) {
                     MessageManager::getInstance().requestAiMessage("happy", 
-                        "Felicidad (" + String((int)pet.getHappiness()) + "% > 70%) y salud consolidada");
+                        "Felicidad (" + String((int)pet.getHappiness()) + "% > 70%) y salud consolidada",
+                        pet.getGenome().personalityTag);
                 }
             }
         }
@@ -452,6 +470,7 @@ void PetScene::update(float dt) {
 
     if (messagePopup) messagePopup->update(dt);
     if (configHelpModal) configHelpModal->update(dt);
+    if (personalityRevealModal) personalityRevealModal->update(dt); 
 
     updateSpriteTexture();
 
@@ -525,6 +544,14 @@ void PetScene::onTouchReleased() {
 }
 
 void PetScene::onTouch(uint16_t x, uint16_t y) {
+    // Prioridad absoluta al modal de revelación de personalidad
+    if (personalityRevealModal && personalityRevealModal->isVisible()) {
+        if (personalityRevealModal->getClick(x, y) == 1) {
+            personalityRevealModal->dismiss();
+        }
+        return; 
+    }
+
     // 1. Modal activo tiene prioridad absoluta
     if (isConfigModalActive()) {
         configHelpModal->onTouch(x, y);

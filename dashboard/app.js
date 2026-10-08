@@ -159,6 +159,15 @@ async function readSerialLoop() {
                     const data = JSON.parse(line.substring(7));
                     updateBrainState(data);
                 } catch (e) {}
+                } else if (line.startsWith("!GENOME:") && !isTunerModeActive) {
+                try {
+                    const data = JSON.parse(line.substring(8));
+                    document.getElementById('lblPersonalityTag').innerText = data.tag;
+                    document.getElementById('txtGenMetab').innerText = data.metab.toFixed(2) + "x";
+                    document.getElementById('txtGenSoc').innerText = data.soc.toFixed(2) + "x";
+                    document.getElementById('txtGenRes').innerText = data.res.toFixed(2) + "x";
+                    document.getElementById('txtGenSlp').innerText = data.slp.toFixed(2) + "x";
+                } catch (e) {}
             } else {
                 appendLog(line);
                 if (line.includes("Frase seleccionada:") || line.includes("Motivo neuronal:") || line.includes("Sueno")) {
@@ -214,7 +223,7 @@ function classifyLog(text) {
         text.includes("Especie:") || text.includes("Etapa:") || text.includes("Estado:") || text.includes("Hambre:") || text.includes("Salud:")) return "log-pet";
     if (text.startsWith("[COLOR-SD]") || text.startsWith("[TUNER]")) return "log-tuner";
     if (text.startsWith("[TOUCH]")) return "log-touch";
-    if (text.startsWith("[POWER]")) return "log-power";
+    if (text.startsWith("[MIND]") || text.startsWith("[BRAIN]") || text.startsWith("!GENOME")) return "log-mind"; 
     if (text.startsWith("[MIND]") || text.startsWith("[BRAIN]")) return "log-mind";
     if (text.includes("Urgencia") || text.includes("Mult Hambre") || text.includes("Spike Rate") || text.includes("Dopamina") || text.includes("Apego")) return "log-diag";
     return "log-default";

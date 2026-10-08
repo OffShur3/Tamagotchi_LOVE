@@ -68,6 +68,9 @@ public:
     void jumpToStage(PetStage s);
     void accelerateAge(float seconds = 3600.0f);
 
+    void rollGenetics();
+    const PetGenome& getGenome() const { return genome; }
+
     void setBrain(std::unique_ptr<IBrain> newBrain);
     IBrain* getBrain() const { return brain.get(); }
 
@@ -102,6 +105,7 @@ private:
     PetStage stage = PetStage::Egg;
     PetState state = PetState::Idle;
     uint32_t dnaSeed = 0;
+    PetGenome genome;
 
     float hunger = 100.0f;
     float happiness = 100.0f;

@@ -55,9 +55,10 @@ public:
         return getFallbackOffline(emotion);
     }
 
-    void requestAiMessage(const String& mood, const String& reason) {
+    void requestAiMessage(const String& mood, const String& reason, const String& personalityTag = "Normal") {
         lastMood = mood;
         lastReason = reason;
+        lastPersonality = personalityTag;
 
         Serial.println("\n--------------------------------------------------");
         Serial.printf("[AI-TRIGGER] Disparando pensamiento emocional: %s\n", lastMood.c_str());
@@ -293,10 +294,11 @@ private:
     String pendingMessage = "";
     String lastMood = "happy";
     String lastReason = "Ninguno";
+    String lastPersonality = "Normal";
 
     String buildPromptForEmotion(const String& emotion) {
         String owner = PlayerManager::getInstance().getOwnerName();
-        String p = "Responde en espanol en minusculas como mascota virtual tamagotchi. Maximo 12 palabras. Tu dueno se llama " + owner + ". Dirigete a el en ocasiones con carino y confianza. Estrictamente sin tildes ni enies. Sin comillas. ";
+        String p = "Responde en espanol en minusculas como mascota virtual tamagotchi con una marcada personalidad [ " + lastPersonality + " ]. Maximo 12 palabras. Tu dueno se llama " + owner + ". Dirigete a el en ocasiones con carino y confianza. Estrictamente sin tildes ni enies. Sin comillas. ";
         if (emotion == "happy") p += "Di algo muy alegre y carinoso hacia tu dueno.";
         else if (emotion == "idle") p += "Di algo tranquilo, neutro y agradecido de estar con tu dueno.";
         else if (emotion == "sick") p += "Quejate con ternura de que te duele el cuerpo y necesitas medicina.";

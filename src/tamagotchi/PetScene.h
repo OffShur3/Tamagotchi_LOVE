@@ -10,6 +10,7 @@
 #include "MessagePopup.h"
 #include "MessageManager.h"
 #include "ConfigHelpModal.h"
+#include "PersonalityRevealModal.h"
 #include <memory>
 #include <vector>
 #include <functional>
@@ -125,6 +126,9 @@ private:
 
     std::shared_ptr<MessagePopup> messagePopup = nullptr;
     std::shared_ptr<ConfigHelpModal> configHelpModal = nullptr;
+    std::shared_ptr<PersonalityRevealModal> personalityRevealModal = nullptr;
+
+    PetStage evolutionOldStage = PetStage::Egg; // Para recordar qué etapa era
 
     float telemetryBroadcastTimer = 0.0f;
     float spontaneousThoughtTimer = 0.0f;

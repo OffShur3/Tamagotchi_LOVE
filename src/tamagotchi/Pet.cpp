@@ -20,6 +20,7 @@ void Pet::setBrain(std::unique_ptr<IBrain> newBrain) {
     if (newBrain) {
         brain = std::move(newBrain);
         brain->init();
+        brain->applyGenome(genome);
         Serial.printf("[PET] Transplante de cerebro exitoso! Nuevo cerebro: %s\n", brain->getName());
     }
 }
@@ -29,7 +30,10 @@ void Pet::init() {
         Serial.println("[PET] No se encontró partida. Inicializando huevo...");
         reset();
     }
-    if (brain) brain->init();
+    if (brain) {
+        brain->init();
+        brain->applyGenome(genome); 
+    }
     catchUpTime();
 }
 
@@ -79,6 +83,7 @@ void Pet::printStats() const {
     Serial.printf("  Digestión:   %s (Timer: %.0fs)\n", digesting ? "EN CURSO" : "INACTIVA", digestiveTransitTimer);
     Serial.printf("  Luz:         %s\n", lightsOn ? "ENCENDIDA" : "APAGADA");
     Serial.printf("  Edad:        %u segs (%.1f%% de vida)\n", (uint32_t)age, lifePercent);
+    Serial.printf("  Genoma:      Metab:%.2f | Soc:%.2f | Res:%.2f | Slp:%.2f\n", genome.metabolismRate, genome.socialNeed, genome.resilience, genome.sleepPacing);
     Serial.println("---------------------------------");
     Serial.printf("  CEREBRO:     %s\n", brain ? brain->getName() : "Sin Cerebro");
     Serial.printf("  Spike Rate:  %.2f spikes/sec (Hz)\n", brain ? brain->getSpikeRate() : 0.0f);
@@ -251,11 +256,15 @@ void Pet::checkEvolution() {
         if (stage == PetStage::Egg && newStage == PetStage::Baby) {
             auto available = discoverInstalledSpecies();
             species = available[random(0, available.size())];
-            Serial.printf("[PET] ¡Eclosión! Raza asignada: %s\n", species.c_str());
+            
+            rollGenetics(); // Rolear genoma al nacer
+            if (brain) brain->applyGenome(genome);
+            
+            Serial.printf("[PET] ¡Eclosion! Raza asignada: %s | Personalidad: %s\n", species.c_str(), genome.personalityTag.c_str());
         }
 
         stage = newStage;
-        Serial.printf("[PET] ¡Evolución! Nueva etapa: %s\n", stageToString(stage).c_str());
+        Serial.printf("[PET] ¡Evolucion! Nueva etapa: %s\n", stageToString(stage).c_str());
         save();
     }
 }
@@ -500,6 +509,21 @@ bool Pet::load() {
         dnaSeed = esp_random(); 
     }
 
+    // Cargar Genoma
+    if (doc.containsKey("g_metab")) {
+        genome.metabolismRate = doc["g_metab"];
+        genome.socialNeed     = doc["g_soc"];
+        genome.resilience     = doc["g_res"];
+        genome.sleepPacing    = doc["g_slp"];
+        genome.personalityTag = doc["g_tag"].as<String>();
+    } else {
+        if (stage != PetStage::Egg) {
+            rollGenetics();
+        } else {
+            genome = PetGenome(); // Usar "Incubando..."
+        }
+    }
+
     return true;
 }
 
@@ -517,7 +541,12 @@ bool Pet::save() {
     doc["lights"]        = lightsOn;
     doc["age"]           = age;
     doc["lastTimestamp"] = (uint32_t)time(NULL);
-    doc["dna"]           = dnaSeed; // Guardar ADN
+    doc["dna"]           = dnaSeed; // Guardar DNA
+    doc["g_metab"]       = genome.metabolismRate; // Guardar Genoma
+    doc["g_soc"]         = genome.socialNeed;
+    doc["g_res"]         = genome.resilience;
+    doc["g_slp"]         = genome.sleepPacing;
+    doc["g_tag"]         = genome.personalityTag;
 
     SD_MMC.mkdir("/config");
     File f = SD_MMC.open("/config/save.json", "w");
@@ -536,7 +565,43 @@ void Pet::reset() {
     digestiveTransitTimer = 0.0f; digesting = false; poopExposureTimer = 0.0f;
     lastTimestamp = (uint32_t)time(NULL);
     dnaSeed = esp_random(); // Nuevo ADN al reiniciar partida
+    genome = PetGenome(); 
+    if (brain) brain->applyGenome(genome);
     save();
+}
+
+void Pet::rollGenetics() {
+    auto randFloat = []() { return 0.8f + (esp_random() % 51) / 100.0f; }; // Rango 0.8 a 1.3
+    
+    genome.metabolismRate = randFloat();
+    genome.socialNeed = randFloat();
+    genome.resilience = randFloat();
+    genome.sleepPacing = randFloat();
+
+    float maxTrait = genome.metabolismRate;
+    if (genome.socialNeed > maxTrait) maxTrait = genome.socialNeed;
+    if (genome.resilience > maxTrait) maxTrait = genome.resilience;
+    if (genome.sleepPacing > maxTrait) maxTrait = genome.sleepPacing;
+
+    float minTrait = genome.metabolismRate;
+    if (genome.socialNeed < minTrait) minTrait = genome.socialNeed;
+    if (genome.resilience < minTrait) minTrait = genome.resilience;
+    if (genome.sleepPacing < minTrait) minTrait = genome.sleepPacing;
+
+    if (maxTrait == genome.metabolismRate && maxTrait > 1.15f) {
+        genome.personalityTag = "Gloton";
+    } else if (maxTrait == genome.socialNeed && maxTrait > 1.15f) {
+        genome.personalityTag = "Mimoso y pegajoso";
+    } else if (minTrait == genome.socialNeed && minTrait < 0.9f) {
+        genome.personalityTag = "Independiente y callado";
+    } else if (minTrait == genome.resilience && minTrait < 0.9f) {
+        genome.personalityTag = "Ansioso y quejumbroso";
+    } else {
+        genome.personalityTag = "Alegre y normal";
+    }
+    
+    Serial.printf("[PET-GENOME] Genetica roleada: %s (Metab: %.2f, Soc: %.2f, Res: %.2f, Slp: %.2f)\n", 
+                  genome.personalityTag.c_str(), genome.metabolismRate, genome.socialNeed, genome.resilience, genome.sleepPacing);
 }
 
 void Pet::evolveNextStage() {

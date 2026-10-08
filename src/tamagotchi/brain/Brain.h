@@ -27,6 +27,7 @@ public:
     ~Brain() override = default;
 
     void init() override;
+    void applyGenome(const PetGenome& genome) override; 
     void update(float dt, const PetSensoryInput& input) override;
     void emitReward(float amount) override;
     void onFed() override;

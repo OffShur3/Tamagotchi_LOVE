@@ -5,22 +5,6 @@
 #include "Synapse.h"
 #include <vector>
 
-enum ThoughtType {
-    THOUGHT_NONE = -1,
-    THOUGHT_HEART = 0,         // Amor / Afecto
-    THOUGHT_FOOD = 1,          // Apetito / Hambre
-    THOUGHT_PLAY = 2,          // Juego / Interacción
-    THOUGHT_SLEEP = 3,         // Sueño / Cansancio
-    THOUGHT_POOP = 4,          // Suciedad / Caca
-    THOUGHT_MED = 5,           // Dolor / Medicina
-    THOUGHT_STRESS = 6,        // Estrés agudo
-    THOUGHT_CURIOUS = 7,       // Curiosidad exploratoria
-    THOUGHT_NOSTALGIA = 8,     // Ensoñación nostálgica (Reloj)
-    THOUGHT_DAYDREAM = 8,
-    THOUGHT_ANTICIPATION = 9,  // Espera / Anticipación de caricia
-    THOUGHT_CAPRICE = 10       // Capricho / Hastío
-};
-
 class Brain : public IBrain {
 public:
     Brain();
@@ -50,8 +34,12 @@ public:
     }
 
     const char* getName() const override { return "SNN Cognitive-Attachment Decoupled (v3.3)"; }
+    const char* getArchetypeId() const override { return "STD"; }
 
-    int getActiveThought() const { return (int)currentThought; }
+    void saveState(JsonObject obj) const override;
+    void loadState(JsonObjectConst obj) override;
+
+    int getActiveThought() const override { return (int)currentThought; }
     String getActiveThoughtName() const;
     String getLastReason() const { return lastThoughtReason; }
 
@@ -60,15 +48,15 @@ public:
     float getSocialDrive() const { return driveSocial; }
     float getDistressDrive() const { return driveDistress; }
 
-    void stimulateNeuron(int idx, float amount);
-    void nudgeThought(ThoughtType t, const String& reason, float nudge = 0.25f);
-    void forceThought(ThoughtType t, const String& reason) {
+    void stimulateNeuron(int idx, float amount) override;
+    void nudgeThought(ThoughtType t, const String& reason, float nudge = 0.25f) override;
+    void forceThought(ThoughtType t, const String& reason) override {
         nudgeThought(t, reason, 0.35f);
     }
 
     String getTelemetryJson() const override;
 
-private:
+protected:
     std::vector<Neuron> neurons;
     std::vector<Synapse> synapses;
 
@@ -113,9 +101,9 @@ private:
     static const int M_IDLE     = 8;
     static const int M_LOVE     = 9; // 10ª Neurona: Apego Seguro / Serenidad
 
-    void setupConnectome();
-    void processPlasticity(float dt, float trust, PetStage stage);
-    void evaluateThoughts(const PetSensoryInput& input);
-    void computePsychosomaticMultipliers();
-    void overflowThoughtToMotor(ThoughtType t);
+    virtual void setupConnectome();
+    virtual void processPlasticity(float dt, float trust, PetStage stage);
+    virtual void evaluateThoughts(const PetSensoryInput& input);
+    virtual void computePsychosomaticMultipliers();
+    virtual void overflowThoughtToMotor(ThoughtType t);
 };

@@ -655,6 +655,8 @@ void loop() {
             Serial.println("  LIGHTS         : Alternar luz encendida/apagada");
             Serial.println("  STATS / INFO   : Diagnostico completo del sistema");
             Serial.println("  DEBUG          : Alternar visualizacion debug en SD");
+            Serial.println("  BRAIN <tipo>   : Cambiar cerebro (STD, LEARNER, DUMB, HYPER, FSM)");
+            Serial.println("  FF <horas>     : Simular paso de N horas (ej: FF 5, FF 10, FF 12)");
             Serial.println("  STIM <0..9> <V>: Estimular neurona con impulso gradual");
             Serial.println("  THOUGHT <tipo> : Nudge a pensamiento (HEART, FOOD, NOSTALGIA...)");
             Serial.println("  POPUP <tipo>   : Forzar popup (DEATH, UPDATE, NET)");
@@ -750,6 +752,15 @@ void loop() {
             }
             delay(500);
             ESP.restart();
+        }
+        else if (cmd.startsWith("FF ")) {
+            float h = cmd.substring(3).toFloat();
+            if (game && h > 0.0f) game->petFastForward(h);
+        }
+        else if (cmd.startsWith("BRAIN ")) {
+            String bType = cmd.substring(6);
+            bType.trim();
+            if (game) game->setBrainArchetype(bType);
         }
         else if (cmd.startsWith("STIM ")) {
             int firstSpace = cmd.indexOf(' ');

@@ -150,18 +150,39 @@ h3 {
 #tuner-grid { display: none; grid-template-columns: 1fr 450px; margin-bottom:20px;}
 
 /* CANVAS MISIÓN CONTROL */
-.main-canvas-panel { position: relative; padding:0; overflow:hidden;}
-.main-canvas-panel h3 { padding: 16px; margin:0; border:none; position: absolute; z-index:10; width:100%;}
+.main-canvas-panel { 
+    position: relative; 
+    padding: 16px; /* Le devolvemos el padding normal */
+    display: flex;
+    flex-direction: column;
+}
+
+.main-canvas-panel h3 { 
+    padding: 0 0 12px 0; 
+    margin: 0; 
+    position: relative; /* ¡Le quitamos el absolute! Ahora respeta el margen */
+    width: 100%;
+    z-index: 10;
+}
+
 #canvas {
     background: #08060c; 
-    display: block; width: 100%; height: 480px;
-    border-radius: 12px;
+    display: block; 
+    width: 100%; 
+    height: 600px; /* Aumentamos la altura de 480px a 600px */
+    border-radius: 8px;
+    margin-top: 16px;
+    margin-bottom: 30px; /* Espacio para que la barra inferior no lo tape */
 }
+
 .canvas-stats {
-    position: absolute; bottom: 0; left: 0; width: 100%;
+    position: absolute; 
+    bottom: 0; left: 0; width: 100%;
     padding: 10px 16px; background: rgba(0,0,0,0.7); backdrop-filter: blur(5px);
     display: flex; justify-content: space-between; font-size: 11px;
     font-family: var(--font-mono); border-top: 1px solid var(--panel-border);
+    border-bottom-left-radius: 12px;
+    border-bottom-right-radius: 12px;
 }
 
 .badge {

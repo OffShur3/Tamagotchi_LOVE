@@ -39,18 +39,19 @@ let pendingSend = false, isSending = false;
 let currentSpritePath = "../sd_root/tama/sprites/base/tiernito/bebe/idle.png";
 
 // Conectoma de 10 Neuronas intacto
+// Conectoma de 10 Neuronas intacto - Re-espaciado para height: 600
 const neurons = [
-    { id: 0, name: "S_HUNGER",  x: 130, y: 65,  col: "#ff7043", v: 0.0, th: 1.0, spike: false },
-    { id: 1, name: "S_FATIGUE", x: 130, y: 150, col: "#42a5f5", v: 0.0, th: 1.0, spike: false },
-    { id: 2, name: "S_BOREDOM", x: 130, y: 235, col: "#ab47bc", v: 0.0, th: 1.0, spike: false },
-    { id: 3, name: "S_PAIN",    x: 130, y: 320, col: "#ef5350", v: 0.0, th: 1.0, spike: false },
-    { id: 4, name: "S_TOUCH",   x: 130, y: 405, col: "#26a69a", v: 0.0, th: 0.5, spike: false },
+    { id: 0, name: "S_HUNGER",  x: 130, y: 80,  col: "#ff7043", v: 0.0, th: 1.0, spike: false },
+    { id: 1, name: "S_FATIGUE", x: 130, y: 180, col: "#42a5f5", v: 0.0, th: 1.0, spike: false },
+    { id: 2, name: "S_BOREDOM", x: 130, y: 280, col: "#ab47bc", v: 0.0, th: 1.0, spike: false },
+    { id: 3, name: "S_PAIN",    x: 130, y: 380, col: "#ef5350", v: 0.0, th: 1.0, spike: false },
+    { id: 4, name: "S_TOUCH",   x: 130, y: 480, col: "#26a69a", v: 0.0, th: 0.5, spike: false },
 
-    { id: 5, name: "M_SLEEP",   x: 760, y: 65,  col: "#5c6bc0", v: 0.0, th: 2.0, spike: false },
-    { id: 6, name: "M_PLAY",    x: 760, y: 150, col: "#66bb6a", v: 0.0, th: 1.8, spike: false },
-    { id: 7, name: "M_SICK",    x: 760, y: 235, col: "#e53935", v: 0.0, th: 1.8, spike: false },
-    { id: 8, name: "M_IDLE",    x: 760, y: 405, col: "#ffa726", v: 0.0, th: 0.8, spike: false },
-    { id: 9, name: "M_LOVE",    x: 760, y: 320, col: "#f06292", v: 0.0, th: 1.6, spike: false }
+    { id: 5, name: "M_SLEEP",   x: 760, y: 80,  col: "#5c6bc0", v: 0.0, th: 2.0, spike: false },
+    { id: 6, name: "M_PLAY",    x: 760, y: 180, col: "#66bb6a", v: 0.0, th: 1.8, spike: false },
+    { id: 7, name: "M_SICK",    x: 760, y: 280, col: "#e53935", v: 0.0, th: 1.8, spike: false },
+    { id: 8, name: "M_IDLE",    x: 760, y: 480, col: "#ffa726", v: 0.0, th: 0.8, spike: false },
+    { id: 9, name: "M_LOVE",    x: 760, y: 380, col: "#f06292", v: 0.0, th: 1.6, spike: false }
 ];
 
 let synapses = [
@@ -812,10 +813,11 @@ function renderConnectome() {
         ctx.beginPath(); ctx.moveTo(0, y); ctx.lineTo(canvas.width, y); ctx.stroke();
     }
 
-    ctx.fillStyle = "#90a4ae";
+ctx.fillStyle = "#90a4ae";
     ctx.font = "bold 11px monospace";
-    ctx.fillText("CORTEZA AFERENTE (SENSORIAL)", 30, 25);
-    ctx.fillText("CORTEZA EFERENTE (MOTORA & APEGO)", 620, 25);
+    // Bajamos el Y a 35 para que respire desde el borde superior
+    ctx.fillText("CORTEZA AFERENTE (SENSORIAL)", 30, 35);
+    ctx.fillText("CORTEZA EFERENTE (MOTORA & APEGO)", 620, 35);
 
     for (let s of synapses) {
         let pre = neurons[s.pre];

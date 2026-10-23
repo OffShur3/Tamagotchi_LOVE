@@ -9,7 +9,7 @@ public:
 
     void update(float dt, const PetSensoryInput& in) override {
         if (!in.lightsOn) {
-            decision = (in.energy >= 100.0f) ? PetState::Idle : PetState::Sleeping;
+            decision = PetState::Sleeping;
             return;
         }
         if (in.health < 30.0f || in.poopCount >= 2) {
@@ -24,6 +24,9 @@ public:
     void emitReward(float amount) override {}
     PetState getDecision() const override { return decision; }
     const char* getName() const override { return "FSM Reactivo (1996)"; }
+    const char* getArchetypeId() const override { return "FSM"; }
+    void saveState(JsonObject obj) const override { obj["decision"] = (int)decision; }
+    void loadState(JsonObjectConst obj) override { if (!obj.isNull()) decision = static_cast<PetState>(obj["decision"] | 0); }
 
     String getTelemetryJson() const override {
         return "{\"name\":\"FSM Reactivo 1996\",\"dopamine\":0,\"spikeRate\":0,\"thought\":\"-1\"}";

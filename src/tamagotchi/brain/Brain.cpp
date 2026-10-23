@@ -281,9 +281,14 @@ void Brain::evaluateThoughts(const PetSensoryInput& input) {
         newThought = THOUGHT_FOOD;
         motivo = "Apetito (Pancho). Impulso de hambre al " + String((int)driveHunger) + "%.";
     }
-    else if (driveSleep >= 60.0f && !input.lightsOn) {
+    else if (input.lightsOn && (driveSleep >= 60.0f || input.isBedtimeHours)) {
         newThought = THOUGHT_SLEEP;
-        motivo = "Deseo de dormir. Energia baja (" + String((int)input.energy) + "%).";
+        if (input.isBedtimeHours && driveSleep < 60.0f) {
+            driveSleep = 75.0f;
+            motivo = "Horario de dormir (22h-04h): Tiene ganas de acostarse por costumbre.";
+        } else {
+            motivo = "Deseo de dormir. Energia baja (" + String((int)input.energy) + "%).";
+        }
     }
     else if (driveSocial >= 45.0f) {
         newThought = THOUGHT_PLAY;
@@ -409,7 +414,9 @@ void Brain::update(float dt, const PetSensoryInput& input) {
 
     // Alimentación de neuronas sensoriales (0..4)
     neurons[S_HUNGER].feed((100.0f - constrain(input.hunger, 0.0f, 100.0f)) * 0.04f * safeDt);
-    neurons[S_FATIGUE].feed((100.0f - constrain(input.energy, 0.0f, 100.0f)) * 0.04f * safeDt);
+    float fatigueSignal = (100.0f - constrain(input.energy, 0.0f, 100.0f));
+    if (input.lightsOn && input.isBedtimeHours) fatigueSignal = max(fatigueSignal, 75.0f);
+    neurons[S_FATIGUE].feed(fatigueSignal * 0.04f * safeDt);
     neurons[S_PAIN].feed(((100.0f - constrain(input.health, 0.0f, 100.0f)) * 0.05f + (constrain(input.poopCount, 0, 3) * 0.35f)) * safeDt);
     neurons[S_BOREDOM].feed((100.0f - constrain(input.happiness, 0.0f, 100.0f)) * 0.04f * safeDt);
 
@@ -475,7 +482,7 @@ void Brain::update(float dt, const PetSensoryInput& input) {
     }
 
     if (!input.lightsOn) {
-        currentDecision = (input.energy >= 100.0f) ? PetState::Idle : PetState::Sleeping;
+        currentDecision = PetState::Sleeping;
         return;
     }
 
@@ -521,6 +528,66 @@ PetState Brain::getDecision() const {
 
 float Brain::getStressLevel() const {
     return neurons[S_PAIN].potential;
+}
+
+void Brain::saveState(JsonObject obj) const {
+    obj["dopamine"]   = dopamine;
+    obj["rumination"] = ruminationLevel;
+    obj["thought"]    = (int)currentThought;
+    obj["reason"]     = lastThoughtReason;
+    obj["decision"]   = (int)currentDecision;
+
+    JsonArray nArr = obj.createNestedArray("neurons");
+    for (size_t i = 0; i < neurons.size(); ++i) {
+        JsonObject nObj = nArr.createNestedObject();
+        nObj["v"]  = neurons[i].potential;
+        nObj["th"] = neurons[i].threshold;
+        nObj["lk"] = neurons[i].leak;
+    }
+
+    JsonArray sArr = obj.createNestedArray("synapses");
+    for (size_t i = 0; i < synapses.size(); ++i) {
+        JsonObject sObj = sArr.createNestedObject();
+        sObj["pre"]  = synapses[i].preIndex;
+        sObj["post"] = synapses[i].postIndex;
+        sObj["w"]    = synapses[i].weight;
+        sObj["maxW"] = synapses[i].maxWeight;
+        sObj["minW"] = synapses[i].minWeight;
+    }
+}
+
+void Brain::loadState(JsonObjectConst obj) {
+    if (obj.isNull()) return;
+
+    dopamine          = obj["dopamine"] | 0.5f;
+    ruminationLevel   = obj["rumination"] | 0.0f;
+    currentThought    = static_cast<ThoughtType>(obj["thought"] | -1);
+    lastThoughtReason = obj["reason"] | "Mente restaurada desde SD";
+    currentDecision   = static_cast<PetState>(obj["decision"] | 0);
+
+    JsonArrayConst nArr = obj["neurons"].as<JsonArrayConst>();
+    if (!nArr.isNull() && nArr.size() == neurons.size()) {
+        size_t idx = 0;
+        for (JsonObjectConst nObj : nArr) {
+            neurons[idx].potential = nObj["v"]  | 0.0f;
+            neurons[idx].threshold = nObj["th"] | neurons[idx].threshold;
+            neurons[idx].leak      = nObj["lk"] | neurons[idx].leak;
+            idx++;
+        }
+    }
+
+    JsonArrayConst sArr = obj["synapses"].as<JsonArrayConst>();
+    if (!sArr.isNull() && sArr.size() > 0) {
+        synapses.clear();
+        for (JsonObjectConst sObj : sArr) {
+            int pre    = sObj["pre"]  | 0;
+            int post   = sObj["post"] | 0;
+            float w    = sObj["w"]    | 0.5f;
+            float maxW = sObj["maxW"] | 2.0f;
+            float minW = sObj["minW"] | -2.0f;
+            synapses.push_back(Synapse(pre, post, w, maxW, minW));
+        }
+    }
 }
 
 String Brain::getTelemetryJson() const {

@@ -1,5 +1,6 @@
 // src/tamagotchi/Pet.cpp
 #include "Pet.h"
+#include "brain/BrainArchetypes.h"
 #include <SD_MMC.h>
 #include <ArduinoJson.h>
 
@@ -25,42 +26,54 @@ void Pet::setBrain(std::unique_ptr<IBrain> newBrain) {
     }
 }
 
+void Pet::selectBrainArchetype(const String& archetypeName) {
+    setBrain(createBrainArchetype(archetypeName));
+    save();
+}
+
 void Pet::init() {
     if (!load()) {
         Serial.println("[PET] No se encontró partida. Inicializando huevo...");
         reset();
     }
-    if (brain) {
-        brain->init();
-        brain->applyGenome(genome); 
-    }
     catchUpTime();
 }
 
-void Pet::catchUpTime() {
+bool Pet::isBedtimeHours() const {
     time_t now = time(NULL);
-    if (now < 1700000000) return; 
+    if (now < 1700000000) return false;
+    struct tm tInfo;
+    localtime_r(&now, &tInfo);
+    return (tInfo.tm_hour >= 22 || tInfo.tm_hour < 4);
+}
 
+void Pet::catchUpTime() {
+    uint32_t now = (uint32_t)time(NULL);
     if (stage == PetStage::Dead || state == PetState::Dead) return;
 
-    if (lastTimestamp > 0 && lastTimestamp >= 1700000000 && now > lastTimestamp) {
-        uint32_t elapsed = (uint32_t)(now - lastTimestamp);
+    // Soporta tanto reloj sincronizado por NTP (>= 1700000000) como reloj RTC interno en Deep Sleep Offline
+    bool bothSynced  = (now >= 1700000000 && lastTimestamp >= 1700000000);
+    bool bothOffline = (now < 1700000000 && lastTimestamp > 0 && lastTimestamp < 1700000000);
 
-        if (elapsed > 2 && elapsed <= 10800) {
-            Serial.printf("[PET] Procesando %u segundos transcurridos fuera de línea...\n", elapsed);
+    if ((bothSynced || bothOffline) && now > lastTimestamp) {
+        uint32_t elapsed = now - lastTimestamp;
+
+        // Simula hasta 48 horas (172800 s) de Deep Sleep o apagado real
+        if (elapsed > 2 && elapsed <= 172800) {
+            Serial.printf("[PET] Procesando %u segundos (%.2f horas) de Deep Sleep / Offline...\n", elapsed, elapsed / 3600.0f);
             uint32_t remaining = elapsed;
             while (remaining > 0) {
-                float step = (remaining > 60) ? 60.0f : (float)remaining;
+                float step = (remaining > 30) ? 30.0f : (float)remaining;
                 update(step);
                 remaining -= (uint32_t)step;
             }
-            save(); 
-        } else if (elapsed > 10800) {
-            Serial.printf("[PET] Gran salto temporal detectado (%u s). Sincronizando hora sin penalización.\n", elapsed);
+            save();
+        } else if (elapsed > 172800) {
+            Serial.printf("[PET] Salto mayor a 48h detectado (%u s). Sincronizando reloj sin penalizacion.\n", elapsed);
             save();
         }
     }
-    lastTimestamp = (uint32_t)now;
+    lastTimestamp = now;
     printStats();
 }
 
@@ -106,7 +119,7 @@ void Pet::update(float dt) {
         
         if (brain) {
             PetSensoryInput deadInput = { 
-                0.0f, 0.0f, 0.0f, 0.0f, poopCount, lightsOn, false, stage, false, trust 
+                0.0f, 0.0f, 0.0f, 0.0f, poopCount, lightsOn, false, stage, false, trust, false 
             };
             brain->update(dt, deadInput);
         }
@@ -138,79 +151,110 @@ void Pet::update(float dt) {
     checkEvolution();
 
     if (stage != PetStage::Egg) {
-        float stageHungerMult = (stage == PetStage::Baby) ? 1.5f : 1.0f;
-        float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.4f : 1.0f;
+        float stageHungerMult = (stage == PetStage::Baby) ? 1.25f : 1.0f;
+        float stageEnergyMult = (stage == PetStage::Baby || stage == PetStage::Senior) ? 1.25f : 1.0f;
 
         float hungerCognitiveMult = brain ? brain->getHungerMetabolicRate() : 1.0f;
         float energyCognitiveMult = brain ? brain->getEnergyDrainMultiplier() : 1.0f;
         float stressCognitiveMult = brain ? brain->getStressMultiplier() : 1.0f;
 
-        float hungerRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.06f)) * stageHungerMult * hungerCognitiveMult;
-        hunger = max(0.0f, hunger - (hungerRate * dt));
-
-        float happinessRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.10f));
-        happiness = max(0.0f, happiness - (happinessRate * dt));
-
         if (!lightsOn) {
-            if (state == PetState::Sleeping) {
-                float energyGain = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f));
-                energy = min(100.0f, energy + (energyGain * dt));
-                if (energy >= 100.0f) {
-                    energy = 100.0f;
-                    state = PetState::Idle;
-                    Serial.println("[PET] Mascota recupero el 100% de energia. Se desperto sola.");
-                }
-            } else {
-                if (energy >= 100.0f) {
-                    energy = 100.0f;
-                } else {
-                    float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.20f)) * energyCognitiveMult;
-                    energy = max(0.0f, energy - (energyRate * dt));
-                }
-            }
-        } else {
-            float energyRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.12f)) * stageEnergyMult * energyCognitiveMult;
-            energy = max(0.0f, energy - (energyRate * dt));
-        }
+            // ================= MODO SUEÑO (LUZ APAGADA - OPCIÓN A) =================
+            state = PetState::Sleeping;
+            unattendedSleepTimer += dt;
 
-        // ================= MOTOR DIGESTIVO BIOLÓGICO =================
-        if (digesting) {
-            if (hunger < 20.0f) {
-                digesting = false; // El tránsito digestivo cesa con estómago vacío
-            } else {
-                digestiveTransitTimer -= dt;
-                if (digestiveTransitTimer <= 0.0f) {
+            // 1. Energía: Se recupera al 100% en ~6.5 horas (23400 s) y sigue durmiendo en paz
+            float energyGainPerSec = 100.0f / 23400.0f;
+            energy = min(100.0f, energy + (energyGainPerSec * dt));
+
+            // 2. Hambre Nocturna:
+            // - Primeras 10h (hunger >= 25%): baja 7.5%/h -> a las 10h despierta con ~25% de hambre
+            // - De 10h a 12h (hunger < 25%): baja 10.0%/h -> a las 12h llega a ~5% (hambre crítica)
+            float sleepHungerPerHour = (hunger >= 25.0f) ? 7.5f : 10.0f;
+            hunger = max(0.0f, hunger - ((sleepHungerPerHour / 3600.0f) * dt));
+
+            // 3. Felicidad Nocturna:
+            // - Primeras 10h: baja 5.5%/h -> a las 10h queda en ~45%
+            // - Pasadas las 10h: baja 12.0%/h por angustia de soledad
+            float sleepHappyPerHour = (unattendedSleepTimer <= 36000.0f) ? 5.5f : 12.0f;
+            happiness = max(0.0f, happiness - ((sleepHappyPerHour / 3600.0f) * dt));
+
+            // 4. Descuido Nocturno (> 10.5h - 12h o hambre < 12%): Miedo al abandono y caca por susto
+            bool isAbandonedInSleep = (unattendedSleepTimer > 37800.0f || hunger < 12.0f);
+            if (isAbandonedInSleep) {
+                if (!abandonmentPoopTriggered && (unattendedSleepTimer > 39600.0f || hunger <= 8.0f)) {
+                    abandonmentPoopTriggered = true;
                     if (poopCount < 3) {
                         poopCount++;
                         poopExposureTimer = 0.0f;
-                        Serial.printf("[PET] Proceso digestivo completado. La mascota hizo caca! (Total: %d/3)\n", poopCount);
                     }
+                    if (brain) {
+                        brain->forceThought(THOUGHT_STRESS, "Susto por abandono: Penso que no volverias a alimentarlo");
+                    }
+                    Serial.println("[PET] ¡Descuido prolongado (>11h)! Hizo caca por tiempo y miedo al abandono.");
+                }
+
+                // Pérdida de Salud (~15%/h) y Apego (~6%/h) tras superar el límite de las 10.5h
+                float abandonHealthDrop = (15.0f / 3600.0f) * (1.0f + (poopCount * 0.4f)) * stressCognitiveMult;
+                health = max(0.0f, health - (abandonHealthDrop * dt));
+                trust  = max(0.0f, trust  - ((6.0f / 3600.0f) * dt));
+            }
+        } else {
+            // ================= MODO VIGILIA / DÍA (LUZ PRENDIDA) =================
+            unattendedSleepTimer = 0.0f;
+            abandonmentPoopTriggered = false;
+
+            // 1. Hambre Diurna: 100% a 0% en ~5.5 horas (19800 s -> ~18.18%/h)
+            float awakeHungerRate = (100.0f / 19800.0f) * stageHungerMult * hungerCognitiveMult;
+            hunger = max(0.0f, hunger - (awakeHungerRate * dt));
+
+            // 2. Felicidad Diurna: 100% a 0% en ~8.0 horas (28800 s -> 12.5%/h)
+            float awakeHappyRate = (100.0f / 28800.0f);
+            happiness = max(0.0f, happiness - (awakeHappyRate * dt));
+
+            // 3. Energía Diurna: 100% a 0% en ~15.0 horas (54000 s -> ~6.67%/h)
+            float awakeEnergyRate = (100.0f / 54000.0f) * stageEnergyMult * energyCognitiveMult;
+            energy = max(0.0f, energy - (awakeEnergyRate * dt));
+
+            // 4. Motor Digestivo Biológico (Activo estando despierto)
+            if (digesting) {
+                if (hunger < 15.0f) {
                     digesting = false;
+                } else {
+                    digestiveTransitTimer -= dt;
+                    if (digestiveTransitTimer <= 0.0f) {
+                        if (poopCount < 3) {
+                            poopCount++;
+                            poopExposureTimer = 0.0f;
+                            Serial.printf("[PET] Proceso digestivo completado. La mascota hizo caca! (Total: %d/3)\n", poopCount);
+                        }
+                        digesting = false;
+                    }
                 }
             }
-        }
 
-        // ================= PENALIZACIÓN POR NEGLIGENCIA HIGIÉNICA =================
-        if (poopCount > 0) {
-            poopExposureTimer += dt;
-            // Más de 15 minutos sin limpiar: estimulación de dolor físico
-            if (poopExposureTimer > 900.0f && brain) {
-                static_cast<Brain*>(brain.get())->stimulateNeuron(3, 0.08f * dt);
+            // 5. Penalización por negligencia estando despierto
+            if (poopCount > 0) {
+                poopExposureTimer += dt;
+                if (poopExposureTimer > 900.0f && brain) {
+                    brain->stimulateNeuron(3, 0.08f * dt);
+                }
+                if (poopExposureTimer > 1200.0f) {
+                    trust = max(0.0f, trust - (0.2f * dt / 60.0f));
+                }
             }
-            // Más de 20 minutos: erosión de confianza y apego
-            if (poopExposureTimer > 1200.0f) {
-                trust = max(0.0f, trust - (0.2f * dt / 60.0f));
+
+            if (hunger < 12.0f) {
+                // Si pasa >5 horas despierto sin comer (hambre < 12%), empieza a asustarse y perder apego
+                trust = max(0.0f, trust - (0.35f * dt / 60.0f));
+            } else if (health < 30.0f && state == PetState::Sick) {
+                trust = max(0.0f, trust - (0.30f * dt / 60.0f));
             }
-        }
 
-        // Erosión por abandono en hambre crítica o enfermedad prolongada
-        if (hunger < 15.0f || (health < 30.0f && state == PetState::Sick)) {
-            trust = max(0.0f, trust - (0.3f * dt / 60.0f));
-        }
-
-        if (poopCount > 0 || hunger <= 0.0f || happiness <= 0.0f) {
-            float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1) * stressCognitiveMult;
-            health = max(0.0f, health - (healthDropRate * dt));
+            if (poopCount > 0 || hunger <= 5.0f || happiness <= 0.0f) {
+                float healthDropRate = (100.0f / (TOTAL_LIFESPAN_SECONDS * 0.02f)) * (poopCount + 1) * stressCognitiveMult;
+                health = max(0.0f, health - (healthDropRate * dt));
+            }
         }
     }
 
@@ -220,7 +264,8 @@ void Pet::update(float dt) {
             (physicalTouchTimer > 0.0f),
             stage,
             (stage == PetStage::Egg),
-            trust
+            trust,
+            isBedtimeHours()
         };
         brain->update(dt, input);
     }
@@ -386,9 +431,15 @@ void Pet::toggleLights() {
         } else {
             state = PetState::Idle;
         }
-    } else if (!lightsOn && energy < 40.0f) {
-        // Acostar a la mascota cuando está cansada construye apego
-        trust = min(100.0f, trust + 2.0f);
+    } else if (!lightsOn) {
+        // Se va a dormir inmediatamente aunque tenga mucha energía
+        state = PetState::Sleeping;
+        unattendedSleepTimer = 0.0f;
+        abandonmentPoopTriggered = false;
+        // Bono de apego si tenía sueño (< 50%) o si lo acostaste en su horario habitual (22h a 04h)
+        if (energy < 50.0f || isBedtimeHours()) {
+            trust = min(100.0f, trust + 2.0f);
+        }
     }
     save();
 }
@@ -414,7 +465,7 @@ void Pet::makeSick() {
     state = PetState::Sick;
     actionTimer = 5.0f;
     if (brain) {
-        static_cast<Brain*>(brain.get())->forceThought(THOUGHT_STRESS, "Enfermedad y dolor agudo inducidos");
+        brain->forceThought(THOUGHT_STRESS, "Enfermedad y dolor agudo inducidos");
     }
     Serial.printf("[TEST] Enfermedad inducida. Salud reducida a: %.1f%%\n", health);
     save();
@@ -486,30 +537,33 @@ bool Pet::load() {
     File f = SD_MMC.open("/config/save.json", "r");
     if (!f) return false;
 
-    SpiRamJsonDocument doc(2048);
+    SpiRamJsonDocument doc(8192);
     DeserializationError err = deserializeJson(doc, f);
     f.close();
     if (err) return false;
 
-    species       = doc["species"] | "tiernito";
-    stage         = static_cast<PetStage>(doc["stage"] | 0);
-    state         = static_cast<PetState>(doc["state"] | 0);
-    hunger        = doc["hunger"] | 100.0f;
-    happiness     = doc["happiness"] | 100.0f;
-    energy        = doc["energy"] | 100.0f;
-    health        = doc["health"] | 100.0f;
-    trust         = doc["trust"] | 5.0f;
-    poopCount     = doc["poop"] | 0;
-    lightsOn      = doc["lights"] | true;
-    age           = doc["age"] | 0.0f;
-    lastTimestamp = doc["lastTimestamp"] | 0;
-    if (doc.containsKey("dna")) { // Cargar ADN o generar uno si es un perfil viejo
+    species                  = doc["species"] | "tiernito";
+    stage                    = static_cast<PetStage>(doc["stage"] | 0);
+    state                    = static_cast<PetState>(doc["state"] | 0);
+    hunger                   = doc["hunger"] | 100.0f;
+    happiness                = doc["happiness"] | 100.0f;
+    energy                   = doc["energy"] | 100.0f;
+    health                   = doc["health"] | 100.0f;
+    trust                    = doc["trust"] | 5.0f;
+    poopCount                = doc["poop"] | 0;
+    lightsOn                 = doc["lights"] | true;
+    age                      = doc["age"] | 0.0f;
+    lastTimestamp            = doc["lastTimestamp"] | 0;
+    unattendedSleepTimer     = doc["sleepTimer"] | 0.0f;
+    abandonmentPoopTriggered = doc["abanPoop"] | false;
+
+    if (doc.containsKey("dna")) {
         dnaSeed = doc["dna"];
     } else {
         dnaSeed = esp_random(); 
     }
 
-    // Cargar Genoma
+    // 1. Cargar Genoma
     if (doc.containsKey("g_metab")) {
         genome.metabolismRate = doc["g_metab"];
         genome.socialNeed     = doc["g_soc"];
@@ -520,7 +574,20 @@ bool Pet::load() {
         if (stage != PetStage::Egg) {
             rollGenetics();
         } else {
-            genome = PetGenome(); // Usar "Incubando..."
+            genome = PetGenome();
+        }
+    }
+
+    // 2. Restaurar Arquetipo y Estado Completo del Cerebro (Neuronas + Sinapsis + Dopamina)
+    String bType = doc["brain_type"] | "STD";
+    brain = createBrainArchetype(bType);
+    if (brain) {
+        brain->init();
+        brain->applyGenome(genome);
+        if (doc.containsKey("brain_state")) {
+            brain->loadState(doc["brain_state"].as<JsonObjectConst>());
+            Serial.printf("[PET] Estado cerebral restaurado desde SD (Tipo: %s | %s)\n",
+                          bType.c_str(), brain->getName());
         }
     }
 
@@ -528,7 +595,7 @@ bool Pet::load() {
 }
 
 bool Pet::save() {
-    SpiRamJsonDocument doc(2048);
+    SpiRamJsonDocument doc(8192);
     doc["species"]       = species;
     doc["stage"]         = static_cast<int>(stage);
     doc["state"]         = static_cast<int>(state);
@@ -541,12 +608,20 @@ bool Pet::save() {
     doc["lights"]        = lightsOn;
     doc["age"]           = age;
     doc["lastTimestamp"] = (uint32_t)time(NULL);
-    doc["dna"]           = dnaSeed; // Guardar DNA
-    doc["g_metab"]       = genome.metabolismRate; // Guardar Genoma
+    doc["sleepTimer"]    = unattendedSleepTimer;
+    doc["abanPoop"]      = abandonmentPoopTriggered;
+    doc["dna"]           = dnaSeed;
+    doc["g_metab"]       = genome.metabolismRate;
     doc["g_soc"]         = genome.socialNeed;
     doc["g_res"]         = genome.resilience;
     doc["g_slp"]         = genome.sleepPacing;
     doc["g_tag"]         = genome.personalityTag;
+
+    if (brain) {
+        doc["brain_type"] = brain->getArchetypeId();
+        JsonObject brainObj = doc.createNestedObject("brain_state");
+        brain->saveState(brainObj);
+    }
 
     SD_MMC.mkdir("/config");
     File f = SD_MMC.open("/config/save.json", "w");
@@ -563,10 +638,14 @@ void Pet::reset() {
     hunger = 100.0f; happiness = 100.0f; energy = 100.0f; health = 100.0f; trust = 5.0f;
     poopCount = 0; lightsOn = true; age = 0.0f; actionTimer = 0.0f; poopTimer = 0.0f;
     digestiveTransitTimer = 0.0f; digesting = false; poopExposureTimer = 0.0f;
+    unattendedSleepTimer = 0.0f; abandonmentPoopTriggered = false;
     lastTimestamp = (uint32_t)time(NULL);
     dnaSeed = esp_random(); // Nuevo ADN al reiniciar partida
     genome = PetGenome(); 
-    if (brain) brain->applyGenome(genome);
+    if (brain) {
+        brain->init();
+        brain->applyGenome(genome);
+    }
     save();
 }
 

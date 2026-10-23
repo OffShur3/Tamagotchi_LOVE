@@ -50,12 +50,16 @@ public:
     void petEvolveNext()           { pet.evolveNextStage(); }
     void petJumpStage(PetStage s)  { pet.jumpToStage(s); }
     void petAccelerateAge()        { pet.accelerateAge(3600.0f); }
+    void petFastForward(float h)   { pet.fastForwardHours(h); }
 
     void stimulateBrain(int neuron, float val) {
-        if (pet.getBrain()) static_cast<Brain*>(pet.getBrain())->stimulateNeuron(neuron, val);
+        if (pet.getBrain()) pet.getBrain()->stimulateNeuron(neuron, val);
     }
     void nudgeThought(ThoughtType t, const String& reason, float nudge = 0.25f) {
-        if (pet.getBrain()) static_cast<Brain*>(pet.getBrain())->nudgeThought(t, reason, nudge);
+        if (pet.getBrain()) pet.getBrain()->nudgeThought(t, reason, nudge);
+    }
+    void setBrainArchetype(const String& typeName) {
+        pet.selectBrainArchetype(typeName);
     }
 
     uint16_t* getFramebuffer() { return renderer.getFramebuffer(); }

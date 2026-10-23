@@ -36,7 +36,7 @@
     <div id="main-grid">
         <div class="panel glass-panel main-canvas-panel">
             <h3>Conectoma Neuronal Vivo <span class="badge">10 Nodos</span></h3>
-            <canvas id="canvas" width="890" height="460"></canvas>
+            <canvas id="canvas" width="890" height="600"></canvas>
             <div class="canvas-stats text-muted">
                 <span><b style="color:var(--text-color);">*</b> Brillo blanco = Spike</span>
                 <span>Spikes: <b id="lblSpikeRate" style="color:white;">0.0</b> <span class="dimmed">Hz</span></span>
@@ -348,6 +348,18 @@
                     <span class="chip" onclick="sendCommand('POPUP DEATH')">D-Pop</span>
                     <span class="chip" onclick="sendCommand('POPUP UPDATE')">OTA-Pop</span>
                     <span class="chip" onclick="sendCommand('POPUP NET')">W-Pop</span>
+                </div>
+
+                <div class="suite-group">
+                    <span class="suite-title">🧬 Cerebros</span>
+                    <span class="chip chip-gold" onclick="sendCommand('BRAIN STD')">🧠 SNN Estándar</span>
+                    <span class="chip chip-green glow" onclick="sendCommand('BRAIN LEARNER')">🎓 Pavlov Learner (STDP)</span>
+                    <span class="chip chip-danger" onclick="sendCommand('BRAIN DUMB')">🥴 Tonto / Con Lag</span>
+                    <span class="chip chip-pink" onclick="sendCommand('BRAIN HYPER')">⚡ Hiper / Soñador</span>
+                    <span class="chip chip-blue" onclick="sendCommand('BRAIN FSM')">🤖 FSM 1996</span>
+                    <span class="chip outline" onclick="sendCommand('FF 5')">⏩ +5h</span>
+                    <span class="chip chip-gold outline" onclick="sendCommand('FF 10')">🌙 +10h</span>
+                    <span class="chip chip-danger outline" onclick="sendCommand('FF 12')">⚠️ +12h</span>
                 </div>
 
                 <div class="suite-group" style="border:none;">

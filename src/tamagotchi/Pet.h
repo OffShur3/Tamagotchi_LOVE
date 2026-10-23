@@ -7,13 +7,13 @@
 #include <memory>
 #include <vector>
 
-constexpr float TOTAL_LIFESPAN_SECONDS = 86400.0f; 
+constexpr float TOTAL_LIFESPAN_SECONDS = 1036800.0f; // <-- CAMBIO: 12 días reales de vida
 
-constexpr float EGG_RATIO    = 0.002f; 
-constexpr float BABY_RATIO   = 0.098f; 
-constexpr float CHILD_RATIO  = 0.200f; 
-constexpr float ADULT_RATIO  = 0.500f; 
-constexpr float SENIOR_RATIO = 0.200f; 
+constexpr float EGG_RATIO    = 0.001f; // ~17 minutos
+constexpr float BABY_RATIO   = 0.049f; // ~14 horas
+constexpr float CHILD_RATIO  = 0.200f; // ~2.4 días
+constexpr float ADULT_RATIO  = 0.500f; // ~6 días
+constexpr float SENIOR_RATIO = 0.250f; // ~3 días
 
 class Pet {
 public:
@@ -67,16 +67,31 @@ public:
     void evolveNextStage();
     void jumpToStage(PetStage s);
     void accelerateAge(float seconds = 3600.0f);
+    void fastForwardHours(float hours) {
+        if (hours <= 0.0f || hours > 48.0f) return;
+        uint32_t totalSec = (uint32_t)(hours * 3600.0f);
+        Serial.printf("\n[TIME-WARP] Simulando %.1f horas (%u s) con Luz %s...\n",
+                      hours, totalSec, lightsOn ? "PRENDIDA" : "APAGADA");
+        uint32_t rem = totalSec;
+        while (rem > 0) {
+            float step = (rem > 30) ? 30.0f : (float)rem;
+            update(step);
+            rem -= (uint32_t)step;
+        }
+        save();
+        printStats();
+    }
 
     void rollGenetics();
     const PetGenome& getGenome() const { return genome; }
 
     void setBrain(std::unique_ptr<IBrain> newBrain);
+    void selectBrainArchetype(const String& archetypeName);
     IBrain* getBrain() const { return brain.get(); }
 
     void printStats() const;
     int getThoughtIcon() const {
-        return brain ? static_cast<Brain*>(brain.get())->getActiveThought() : -1;
+        return brain ? brain->getActiveThought() : -1;
     }
 
     bool load();
@@ -95,6 +110,7 @@ public:
     float getTrust() const { return trust; }
     uint8_t getPoopCount() const { return poopCount; }
     bool isLightOn() const { return lightsOn; }
+    bool isBedtimeHours() const;
     uint32_t getAge() const { return (uint32_t)age; }
     uint32_t getDnaSeed() const { return dnaSeed; }
 
@@ -123,10 +139,12 @@ private:
     float poopTimer = 0.0f;
     float autoSaveTimer = 0.0f;
 
-    // Motor Digestivo Biológico
+    // Motor Digestivo Biológico y Control de Sueño / Abandono
     float digestiveTransitTimer = 0.0f;
     bool digesting = false;
     float poopExposureTimer = 0.0f;
+    float unattendedSleepTimer = 0.0f;
+    bool abandonmentPoopTriggered = false;
 
     std::unique_ptr<IBrain> brain;
 

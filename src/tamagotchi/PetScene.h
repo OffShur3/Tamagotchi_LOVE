@@ -72,9 +72,42 @@ public:
     }
 };
 
+// Widget de botón superior para ir a la Plaza Mii (ParkScene)
+class PlazaButtonWidget : public RenderObject {
+public:
+    PlazaButtonWidget() {
+        layer = RenderLayer::UI;
+        position = {120, 30}; // A la izquierda del botón engranaje
+    }
+
+    Size2 getSize() const override { return {16, 14}; }
+
+    void draw(RenderContext& ctx) override {
+        if (!visible) return;
+        int16_t bx = position.x;
+        int16_t by = position.y;
+        uint16_t cBorder = colorTunerCorrect565(DOMAIN_HUD, 0x2104);
+        uint16_t cFill   = colorTunerCorrect565(DOMAIN_HUD, 0x54A8);
+        uint16_t cRoof   = colorTunerCorrect565(DOMAIN_HUD, 0xCE40);
+
+        for (int16_t y = 0; y < 14; ++y) {
+            for (int16_t x = 0; x < 16; ++x) {
+                uint16_t col = (x == 0 || x == 15 || y == 0 || y == 13) ? cBorder : (y < 5 ? cRoof : cFill);
+                ctx.drawPixel(bx + x, by + y, col);
+            }
+        }
+        // Silueta de dos cabecitas Mii/Tama
+        ctx.drawPixel(bx + 5, by + 7, 0xFFFF); ctx.drawPixel(bx + 6, by + 7, 0xFFFF);
+        ctx.drawPixel(bx + 5, by + 8, 0xFFFF); ctx.drawPixel(bx + 6, by + 8, 0xFFFF);
+        ctx.drawPixel(bx + 10, by + 7, 0xFFFF); ctx.drawPixel(bx + 11, by + 7, 0xFFFF);
+        ctx.drawPixel(bx + 10, by + 8, 0xFFFF); ctx.drawPixel(bx + 11, by + 8, 0xFFFF);
+    }
+};
+
 class PetScene : public Scene {
 public:
     using EditPlayerNameCallback = std::function<void()>;
+    using OpenPlazaCallback      = std::function<void()>;
 
     PetScene(Pet& petInstance);
 
@@ -87,6 +120,9 @@ public:
 
     void setOnEditPlayerName(EditPlayerNameCallback cb) {
         onEditPlayerName = cb;
+    }
+    void setOnOpenPlaza(OpenPlazaCallback cb) {
+        onOpenPlaza = cb;
     }
 
     void startMinigame();
@@ -105,6 +141,8 @@ public:
 private:
     Pet& pet;
     EditPlayerNameCallback onEditPlayerName = nullptr;
+    OpenPlazaCallback onOpenPlaza = nullptr;
+    std::shared_ptr<PlazaButtonWidget> plazaWidget = nullptr;
     
     std::shared_ptr<Sprite> petSprite = nullptr;
     std::shared_ptr<Sprite> oldPetSprite = nullptr; 

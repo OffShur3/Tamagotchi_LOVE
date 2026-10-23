@@ -1,7 +1,9 @@
 // src/tamagotchi/Pet.cpp
 #include "Pet.h"
+#include "SpeciesDef.h"
 #include "brain/BrainArchetypes.h"
 #include <SD_MMC.h>
+#include <algorithm>
 #include <ArduinoJson.h>
 
 struct SpiRamAllocator {
@@ -31,12 +33,162 @@ void Pet::selectBrainArchetype(const String& archetypeName) {
     save();
 }
 
+void Pet::migrateLegacySaveIfNeeded() {
+    SD_MMC.mkdir("/config");
+    SD_MMC.mkdir("/config/pets");
+
+    if (SD_MMC.exists("/config/save.json") && !SD_MMC.exists("/config/pets/pet_001.json")) {
+        Serial.println("[MIGRACIÓN] Detectado /config/save.json antiguo. Migrando a /config/pets/pet_001.json...");
+        File src = SD_MMC.open("/config/save.json", "r");
+        if (src) {
+            SpiRamJsonDocument doc(8192);
+            if (!deserializeJson(doc, src)) {
+                src.close();
+                doc["id"] = "pet_001";
+                if (!doc.containsKey("name")) {
+                    String sp = doc["species"] | "Tiernito";
+                    if (sp.length() > 0) sp[0] = toupper(sp[0]);
+                    doc["name"] = sp + " #1";
+                }
+                File dst = SD_MMC.open("/config/pets/pet_001.json", "w");
+                if (dst) {
+                    serializeJson(doc, dst);
+                    dst.close();
+                    setActivePetId("pet_001");
+                    SD_MMC.remove("/config/save.json");
+                    Serial.println("[MIGRACIÓN] Migración completada con éxito a pet_001.json.");
+                }
+            } else {
+                src.close();
+            }
+        }
+    }
+}
+
+String Pet::getActivePetId() {
+    if (SD_MMC.exists("/config/pets/active.txt")) {
+        File f = SD_MMC.open("/config/pets/active.txt", "r");
+        if (f) {
+            String id = f.readStringUntil('\n');
+            id.trim();
+            f.close();
+            if (id.length() > 0) return id;
+        }
+    }
+    return "pet_001";
+}
+
+void Pet::setActivePetId(const String& id) {
+    SD_MMC.mkdir("/config");
+    SD_MMC.mkdir("/config/pets");
+    File f = SD_MMC.open("/config/pets/active.txt", "w");
+    if (f) {
+        f.println(id);
+        f.close();
+    }
+}
+
+std::vector<String> Pet::listSavedPetIds() {
+    std::vector<String> ids;
+    SD_MMC.mkdir("/config/pets");
+    File root = SD_MMC.open("/config/pets");
+    if (!root || !root.isDirectory()) return ids;
+
+    File file = root.openNextFile();
+    while (file) {
+        if (!file.isDirectory()) {
+            String fname = String(file.name());
+            int slash = fname.lastIndexOf('/');
+            if (slash != -1) fname = fname.substring(slash + 1);
+            if (fname.startsWith("pet_") && fname.endsWith(".json")) {
+                String id = fname.substring(0, fname.length() - 5);
+                ids.push_back(id);
+            }
+        }
+        file = root.openNextFile();
+    }
+    std::sort(ids.begin(), ids.end());
+    return ids;
+}
+
+String Pet::spawnNewPet(const String& speciesName, PetStage initialStage, bool lowTrustOrphan) {
+    auto existing = listSavedPetIds();
+    if (existing.size() >= 6) {
+        Serial.println("[PLAZA] Limite maximo de 6 Tamas en la Plaza alcanzado.");
+        return "";
+    }
+
+    int nextNum = 1;
+    char idBuf[16];
+    while (true) {
+        snprintf(idBuf, sizeof(idBuf), "pet_%03d", nextNum);
+        String candidate = String(idBuf);
+        bool used = false;
+        for (const auto& ex : existing) {
+            if (ex == candidate) { used = true; break; }
+        }
+        if (!used) break;
+        nextNum++;
+    }
+
+    Pet tempPet;
+    tempPet.petId = String(idBuf);
+    tempPet.species = speciesName;
+    SpeciesInfo sInfo = getSpeciesInfo(speciesName);
+    tempPet.petName = sInfo.displayName + " #" + String(nextNum);
+    tempPet.dnaSeed = esp_random();
+    tempPet.stage = initialStage;
+    tempPet.state = PetState::Idle;
+    tempPet.lightsOn = true;
+
+    if (initialStage == PetStage::Egg) {
+        tempPet.age = 0.0f;
+        tempPet.genome = PetGenome();
+        tempPet.hunger = 100.0f;
+        tempPet.happiness = 100.0f;
+        tempPet.trust = 5.0f;
+    } else {
+        if (initialStage == PetStage::Baby) tempPet.age = TOTAL_LIFESPAN_SECONDS * EGG_RATIO + 10.0f;
+        else if (initialStage == PetStage::Child) tempPet.age = TOTAL_LIFESPAN_SECONDS * (EGG_RATIO + BABY_RATIO) + 10.0f;
+        tempPet.rollGenetics();
+        if (lowTrustOrphan) {
+            tempPet.hunger = (float)random(25, 65);
+            tempPet.happiness = (float)random(30, 60);
+            tempPet.trust = (float)random(0, 4); // Apego extremadamente bajo (Orfanato)
+        }
+    }
+
+    if (tempPet.brain) {
+        tempPet.brain->init();
+        tempPet.brain->applyGenome(tempPet.genome);
+    }
+    tempPet.save();
+    Serial.printf("[PLAZA] Nuevo Tama registrado en %s (%s - %s)\n",
+                  tempPet.getSaveFilePath().c_str(), tempPet.petName.c_str(), tempPet.genome.personalityTag.c_str());
+    return tempPet.petId;
+}
+
 void Pet::init() {
+    migrateLegacySaveIfNeeded();
+    petId = getActivePetId();
     if (!load()) {
-        Serial.println("[PET] No se encontró partida. Inicializando huevo...");
+        Serial.printf("[PET] No se encontró %s. Inicializando nuevo Tama...\n", getSaveFilePath().c_str());
         reset();
     }
     catchUpTime();
+}
+
+bool Pet::loadById(const String& id) {
+    petId = id;
+    setActivePetId(id);
+    bool ok = load();
+    if (ok) {
+        // Al traer una mascota de la Plaza a la pantalla principal, actualizamos su timestamp
+        // para que el tiempo que estuvo congelada en la Plaza NO le drene estadísticas.
+        lastTimestamp = (uint32_t)time(NULL);
+        save();
+    }
+    return ok;
 }
 
 bool Pet::isBedtimeHours() const {
@@ -479,38 +631,48 @@ void Pet::accelerateAge(float seconds) {
     save();
 }
 
-String Pet::getSpritePath() const {
-    String folder = stageToString(stage);
-    String anim   = stateToString(state);
+String Pet::resolveSpritePathFor(const String& sp, PetStage st, const String& anim) {
+    String folder = stageToString(st);
     String path;
 
-    // 1. Coincidencia exacta
-    path = "/tama/sprites/base/" + species + "/" + folder + "/" + anim + ".png";
+    path = "/tama/sprites/base/" + sp + "/" + folder + "/" + anim + ".png";
     if (SD_MMC.exists(path)) return path;
 
-    // 2. Coincidencia exacta (base tiernito)
     path = "/tama/sprites/base/tiernito/" + folder + "/" + anim + ".png";
     if (SD_MMC.exists(path)) return path;
 
-    // 3. Fallback a IDLE de la etapa actual
-    path = "/tama/sprites/base/" + species + "/" + folder + "/idle.png";
+    // Si pide walk y no existe aun en la SD, usar el idle de la misma etapa
+    if (anim == "walk") {
+        String idleP = "/tama/sprites/base/" + sp + "/" + folder + "/idle.png";
+        if (SD_MMC.exists(idleP)) return idleP;
+        idleP = "/tama/sprites/base/tiernito/" + folder + "/idle.png";
+        if (SD_MMC.exists(idleP)) return idleP;
+    }
+
+    path = "/tama/sprites/base/" + sp + "/" + folder + "/idle.png";
     if (SD_MMC.exists(path)) return path;
     
     path = "/tama/sprites/base/tiernito/" + folder + "/idle.png";
     if (SD_MMC.exists(path)) return path;
 
-    // 4. Fallback a CHILD si la etapa Adulto/Anciano aún no está dibujada
-    path = "/tama/sprites/base/" + species + "/child/idle.png";
+    path = "/tama/sprites/base/" + sp + "/child/idle.png";
     if (SD_MMC.exists(path)) return path;
 
     path = "/tama/sprites/base/tiernito/child/idle.png";
     if (SD_MMC.exists(path)) return path;
 
-    // 5. Fallback final universal a BEBE
-    path = "/tama/sprites/base/" + species + "/bebe/idle.png";
+    path = "/tama/sprites/base/" + sp + "/bebe/idle.png";
     if (SD_MMC.exists(path)) return path;
 
     return "/tama/sprites/base/tiernito/bebe/idle.png";
+}
+
+String Pet::getSpritePath() const {
+    return resolveSpritePathFor(species, stage, stateToString(state));
+}
+
+String Pet::getWalkSpritePath() const {
+    return resolveSpritePathFor(species, stage, "walk");
 }
 
 std::vector<String> Pet::discoverInstalledSpecies() {
@@ -533,8 +695,11 @@ std::vector<String> Pet::discoverInstalledSpecies() {
 }
 
 bool Pet::load() {
-    if (!SD_MMC.exists("/config/save.json")) return false;
-    File f = SD_MMC.open("/config/save.json", "r");
+    SD_MMC.mkdir("/config");
+    SD_MMC.mkdir("/config/pets");
+    String path = getSaveFilePath();
+    if (!SD_MMC.exists(path)) return false;
+    File f = SD_MMC.open(path, "r");
     if (!f) return false;
 
     SpiRamJsonDocument doc(8192);
@@ -542,7 +707,12 @@ bool Pet::load() {
     f.close();
     if (err) return false;
 
+    petId                    = doc["id"]      | petId;
     species                  = doc["species"] | "tiernito";
+    String defPetName        = getSpeciesInfo(species).displayName + " #1";
+    petName                  = doc["name"]    | defPetName.c_str();
+    accHat                   = doc["acc_hat"] | "";
+    accFace                  = doc["acc_face"]| "";
     stage                    = static_cast<PetStage>(doc["stage"] | 0);
     state                    = static_cast<PetState>(doc["state"] | 0);
     hunger                   = doc["hunger"] | 100.0f;
@@ -596,7 +766,11 @@ bool Pet::load() {
 
 bool Pet::save() {
     SpiRamJsonDocument doc(8192);
+    doc["id"]            = petId;
+    doc["name"]          = petName;
     doc["species"]       = species;
+    doc["acc_hat"]       = accHat;
+    doc["acc_face"]      = accFace;
     doc["stage"]         = static_cast<int>(stage);
     doc["state"]         = static_cast<int>(state);
     doc["hunger"]        = hunger;
@@ -624,7 +798,8 @@ bool Pet::save() {
     }
 
     SD_MMC.mkdir("/config");
-    File f = SD_MMC.open("/config/save.json", "w");
+    SD_MMC.mkdir("/config/pets");
+    File f = SD_MMC.open(getSaveFilePath(), "w");
     if (!f) return false;
     serializeJson(doc, f);
     f.close();
@@ -650,12 +825,17 @@ void Pet::reset() {
 }
 
 void Pet::rollGenetics() {
-    auto randFloat = []() { return 0.8f + (esp_random() % 51) / 100.0f; }; // Rango 0.8 a 1.3
-    
-    genome.metabolismRate = randFloat();
-    genome.socialNeed = randFloat();
-    genome.resilience = randFloat();
-    genome.sleepPacing = randFloat();
+    SpeciesInfo sInfo = getSpeciesInfo(species);
+    auto randRange = [](float minV, float maxV) {
+        if (maxV <= minV) return minV;
+        uint32_t span = (uint32_t)((maxV - minV) * 100.0f);
+        return minV + (esp_random() % (span + 1)) / 100.0f;
+    };
+
+    genome.metabolismRate = randRange(sInfo.metabMin, sInfo.metabMax);
+    genome.socialNeed     = randRange(sInfo.socialMin, sInfo.socialMax);
+    genome.resilience     = randRange(sInfo.resMin, sInfo.resMax);
+    genome.sleepPacing    = randRange(sInfo.sleepMin, sInfo.sleepMax);
 
     float maxTrait = genome.metabolismRate;
     if (genome.socialNeed > maxTrait) maxTrait = genome.socialNeed;

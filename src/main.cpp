@@ -432,6 +432,240 @@ void loop() {
         if (game) game->onTimeSynced(); 
     }
 
+    // ==============================================================
+    // 1. LEER PUERTO SERIAL PRIORITARIO (NUNCA SE BLOQUEA EN CALIBRADOR)
+    // ==============================================================
+    while (Serial.available()) {
+        String cmd = Serial.readStringUntil('\n');
+        cmd.trim();
+        if (cmd.length() == 0) continue;
+
+        // El calibrador de color tiene prioridad absoluta si el comando le pertenece
+        if (handleColorTunerCommand(cmd, bus)) {
+            if (!isColorTunerActive()) {
+                AssetManager::getInstance().clearAll();
+                if (game) game->redraw();
+            }
+            continue;
+        }
+
+        cmd.toUpperCase();
+
+        if (cmd == "HELP") {
+            Serial.println("\n==================================================");
+            Serial.println("         TAMA KERNEL - SUITE DE COMANDOS          ");
+            Serial.println("==================================================");
+            Serial.println("  EVOLVE         : Forzar evolucion a siguiente etapa");
+            Serial.println("  STAGE <nom>    : Saltar a etapa (EGG, BABY, CHILD, ADULT, SENIOR)");
+            Serial.println("  ANIMS / TEST   : Showcase de todas las animaciones en SD");
+            Serial.println("  KILL / DIE     : Forzar defuncion (etapa actual + dead.png)");
+            Serial.println("  REVIVE         : Resucitar mascota al 100% de salud");
+            Serial.println("  GODMODE        : 100% a todas las estadisticas y limpiar");
+            Serial.println("  STARVE         : Hambre a 0% (hambre critica/llanto)");
+            Serial.println("  BORED          : Felicidad a 10% (aburrimiento)");
+            Serial.println("  HAPPY          : Felicidad al 100% + dopamina");
+            Serial.println("  SICK           : Inducir enfermedad y dolor (salud baja)");
+            Serial.println("  HEAL           : Curar con botiquin al 100%");
+            Serial.println("  POOP           : Forzar 1 caca (+1)");
+            Serial.println("  POOPMAX        : Forzar 3 cacas al instante");
+            Serial.println("  CLEAN          : Limpiar suelo");
+            Serial.println("  TIRED          : Drenar energia a 0%");
+            Serial.println("  FEED / PET     : Alimentar / Acariciar");
+            Serial.println("  LIGHTS         : Alternar luz encendida/apagada");
+            Serial.println("  STATS / INFO   : Diagnostico completo del sistema");
+            Serial.println("  DEBUG          : Alternar visualizacion debug en SD");
+            Serial.println("  BRAIN <tipo>   : Cambiar cerebro (STD, LEARNER, DUMB, HYPER, FSM)");
+            Serial.println("  FF <horas>     : Simular paso de N horas (ej: FF 5, FF 10, FF 12)");
+            Serial.println("  PURGE_PETS     : Eliminar Tamas de prueba excepto el activo");
+            Serial.println("  STIM <0..9> <V>: Estimular neurona con impulso gradual");
+            Serial.println("  THOUGHT <tipo> : Nudge a pensamiento (HEART, FOOD, NOSTALGIA...)");
+            Serial.println("  POPUP <tipo>   : Forzar popup (DEATH, UPDATE, NET)");
+            Serial.println("  AI <emocion>   : Disparar dialogo IA (HAPPY, SICK, DEAD...)");
+            Serial.println("  RESET          : Reiniciar partida");
+            Serial.println("  RESET_PLAYER   : Reiniciar perfil del jugador y forzar Onboarding");
+            Serial.println("  TUNECOLOURS    : Iniciar calibrador de color (Solo modo Debug)");
+            Serial.println("==================================================");
+        }
+        else if (cmd == "PURGE_PETS") {
+            auto ids = Pet::listSavedPetIds();
+            String active = Pet::getActivePetId();
+            int deleted = 0;
+            for (const auto& id : ids) {
+                if (id != active) {
+                    SD_MMC.remove("/config/pets/" + id + ".json");
+                    deleted++;
+                }
+            }
+            Serial.printf("[PLAZA] Se eliminaron %d Tamas de prueba. Solo queda activa: %s\n", deleted, active.c_str());
+        }
+        else if (cmd.startsWith("FF ")) {
+            float h = cmd.substring(3).toFloat();
+            if (game && h > 0.0f) game->petFastForward(h);
+        }
+        else if (cmd.startsWith("BRAIN ")) {
+            String bType = cmd.substring(6);
+            bType.trim();
+            if (game) game->setBrainArchetype(bType);
+        }
+        else if (cmd == "RESET_PLAYER") {
+            PlayerManager::getInstance().reset();
+            Serial.println("[KERNEL] Perfil de jugador eliminado. Reiniciando placa...");
+            delay(400);
+            ESP.restart();
+        }
+        else if (cmd == "EVOLVE") {
+            if (game) game->petEvolveNext();
+        }
+        else if (cmd.startsWith("STAGE ")) {
+            String s = cmd.substring(6); s.trim();
+            if (s == "EGG") game->petJumpStage(PetStage::Egg);
+            else if (s == "BABY") game->petJumpStage(PetStage::Baby);
+            else if (s == "CHILD") game->petJumpStage(PetStage::Child);
+            else if (s == "ADULT") game->petJumpStage(PetStage::Adult);
+            else if (s == "SENIOR") game->petJumpStage(PetStage::Senior);
+        }
+        else if (cmd == "ANIMS" || cmd == "TEST" || cmd == "SHOWCASE") {
+            if (game) game->startAnimationTest();
+        }
+        else if (cmd == "KILL" || cmd == "DIE") {
+            if (game) game->forcePetState(PetState::Dead);
+        }
+        else if (cmd == "REVIVE") {
+            if (game) game->petRevive();
+        }
+        else if (cmd == "GODMODE") {
+            if (game) game->petGodMode();
+        }
+        else if (cmd == "STARVE") {
+            if (game) game->petStarve();
+        }
+        else if (cmd == "BORED") {
+            if (game) game->petMakeBored();
+        }
+        else if (cmd == "HAPPY") {
+            if (game) game->petMakeHappy();
+        }
+        else if (cmd == "SICK") {
+            if (game) game->petMakeSick();
+        }
+        else if (cmd == "HEAL") {
+            if (game) game->petHeal();
+        }
+        else if (cmd == "POOP") {
+            if (game) game->petForcePoop();
+        }
+        else if (cmd == "POOPMAX") {
+            if (game) game->petMaxPoop();
+        }
+        else if (cmd == "CLEAN") {
+            if (game) game->petClean();
+        }
+        else if (cmd == "TIRED") {
+            if (game) game->petDrainEnergy();
+        }
+        else if (cmd == "FEED") {
+            if (game) game->petFeed();
+        }
+        else if (cmd == "PET") {
+            if (game) game->petPet();
+        }
+        else if (cmd == "LIGHTS") {
+            if (game) game->petToggleLights();
+        }
+        else if (cmd == "STATS" || cmd == "INFO") {
+            if (game) game->printStats();
+        }
+        else if (cmd == "PLAY" || cmd == "GAME") {
+            if (game) game->startMinigame();
+        }
+        else if (cmd == "RESET") {
+            if (game) game->resetGame();
+        }
+        else if (cmd == "DEBUG") {
+            SD_MMC.mkdir("/config");
+            if (SD_MMC.exists("/config/debug.txt")) {
+                SD_MMC.remove("/config/debug.txt");
+                Serial.println("[KERNEL] Debug desactivado en SD. Reiniciando...");
+            } else {
+                File f = SD_MMC.open("/config/debug.txt", "w");
+                if (f) { f.println("ON"); f.close(); }
+                Serial.println("[KERNEL] Debug activado en SD. Reiniciando...");
+            }
+            delay(500);
+            ESP.restart();
+        }
+        else if (cmd.startsWith("STIM ")) {
+            int firstSpace = cmd.indexOf(' ');
+            int secondSpace = cmd.indexOf(' ', firstSpace + 1);
+            if (firstSpace != -1 && secondSpace != -1) {
+                int nIdx = cmd.substring(firstSpace + 1, secondSpace).toInt();
+                float val = cmd.substring(secondSpace + 1).toFloat();
+                if (game) game->stimulateBrain(nIdx, val);
+                Serial.printf("[TEST] Estimulando neurona %d con impulso: %.2f\n", nIdx, val);
+            }
+        }
+        else if (cmd.startsWith("THOUGHT ")) {
+            String tStr = cmd.substring(8); tStr.trim();
+            ThoughtType tt = THOUGHT_HEART;
+            if (tStr == "FOOD") tt = THOUGHT_FOOD;
+            else if (tStr == "PLAY") tt = THOUGHT_PLAY;
+            else if (tStr == "SLEEP") tt = THOUGHT_SLEEP;
+            else if (tStr == "POOP") tt = THOUGHT_POOP;
+            else if (tStr == "MED") tt = THOUGHT_MED;
+            else if (tStr == "STRESS") tt = THOUGHT_STRESS;
+            else if (tStr == "CURIOUS") tt = THOUGHT_CURIOUS;
+            else if (tStr == "NOSTALGIA" || tStr == "DAYDREAM") tt = THOUGHT_NOSTALGIA;
+            else if (tStr == "ANTICIPATION" || tStr == "WAIT") tt = THOUGHT_ANTICIPATION;
+            else if (tStr == "CAPRICE" || tStr == "BOREDOM") tt = THOUGHT_CAPRICE;
+            else if (tStr == "NONE") tt = THOUGHT_NONE;
+            
+            if (game) game->nudgeThought(tt, "Estimulo incremental", 0.35f);
+            Serial.printf("[TEST] Nudge de pensamiento: %s (+acumulacion)\n", tStr.c_str());
+        }
+        else if (cmd.startsWith("POPUP ")) {
+            String pop = cmd.substring(6); pop.trim();
+            if (pop == "DEATH") {
+                currentState = STATE_POPUP_DEATH;
+                UIManager::drawDeathPopup(gfx);
+                popupLaunchTime = millis();
+            } else if (pop == "UPDATE") {
+                currentState = STATE_POPUP_UPDATE;
+                UIManager::drawUpdatePopup(gfx, "NUEVA VERSION", "v1.0.0");
+                popupLaunchTime = millis();
+            } else if (pop == "NET") {
+                currentState = STATE_POPUP;
+                UIManager::drawStardewPopup(gfx);
+                popupLaunchTime = millis();
+            }
+        }
+        else if (cmd.startsWith("AI ")) {
+            String mood = cmd.substring(3); mood.trim(); mood.toLowerCase();
+            MessageManager::getInstance().requestAiMessage(mood, "Comando manual forzado desde Serial");
+        }
+        else if (cmd.startsWith("STATE ")) {
+            String target = cmd.substring(6); target.trim();
+            if (target == "IDLE") game->forcePetState(PetState::Idle);
+            else if (target == "HAPPY") game->forcePetState(PetState::Happy);
+            else if (target == "EATING") game->forcePetState(PetState::Eating);
+            else if (target == "SLEEPING") game->forcePetState(PetState::Sleeping);
+            else if (target == "SICK") game->forcePetState(PetState::Sick);
+            else if (target == "SAD") game->forcePetState(PetState::Sad);
+            else if (target == "DEAD") game->forcePetState(PetState::Dead);
+        }
+    }
+
+    // ==============================================================
+    // 2. MODO CALIBRADOR ACTIVO: Dibuja la escena real y pausa el juego
+    // ==============================================================
+    if (isColorTunerActive()) {
+        renderColorTunerScreen(game ? game->getFramebuffer() : nullptr, 172, 320, gfx);
+        delay(15);
+        return;
+    }
+
+    // ==============================================================
+    // 3. JUEGO NORMAL: tick y flush
+    // ==============================================================
     if (game && (currentState == STATE_GAMEPLAY || currentState == STATE_CONNECTING)) {
         game->tick();
 
@@ -442,6 +676,9 @@ void loop() {
         game->flush(gfx);
     }
 
+    // ==============================================================
+    // 4. MÁQUINA DE ESTADOS KERNEL
+    // ==============================================================
     switch (currentState) {
         case STATE_CONNECTING: {
             if (WiFi.status() == WL_CONNECTED) {
@@ -625,201 +862,6 @@ void loop() {
         }
 
         case STATE_PORTAL: break;
-    }
-
-    if (Serial.available()) {
-        String cmd = Serial.readStringUntil('\n');
-        cmd.trim();
-        cmd.toUpperCase(); 
-
-        if (cmd == "HELP") {
-            Serial.println("\n==================================================");
-            Serial.println("         TAMA KERNEL - SUITE DE COMANDOS          ");
-            Serial.println("==================================================");
-            Serial.println("  EVOLVE         : Forzar evolucion a siguiente etapa");
-            Serial.println("  STAGE <nom>    : Saltar a etapa (EGG, BABY, CHILD, ADULT, SENIOR)");
-            Serial.println("  ANIMS / TEST   : Showcase de todas las animaciones en SD");
-            Serial.println("  KILL / DIE     : Forzar defuncion (etapa actual + dead.png)");
-            Serial.println("  REVIVE         : Resucitar mascota al 100% de salud");
-            Serial.println("  GODMODE        : 100% a todas las estadisticas y limpiar");
-            Serial.println("  STARVE         : Hambre a 0% (hambre critica/llanto)");
-            Serial.println("  BORED          : Felicidad a 10% (aburrimiento)");
-            Serial.println("  HAPPY          : Felicidad al 100% + dopamina");
-            Serial.println("  SICK           : Inducir enfermedad y dolor (salud baja)");
-            Serial.println("  HEAL           : Curar con botiquin al 100%");
-            Serial.println("  POOP           : Forzar 1 caca (+1)");
-            Serial.println("  POOPMAX        : Forzar 3 cacas al instante");
-            Serial.println("  CLEAN          : Limpiar suelo");
-            Serial.println("  TIRED          : Drenar energia a 0%");
-            Serial.println("  FEED / PET     : Alimentar / Acariciar");
-            Serial.println("  LIGHTS         : Alternar luz encendida/apagada");
-            Serial.println("  STATS / INFO   : Diagnostico completo del sistema");
-            Serial.println("  DEBUG          : Alternar visualizacion debug en SD");
-            Serial.println("  BRAIN <tipo>   : Cambiar cerebro (STD, LEARNER, DUMB, HYPER, FSM)");
-            Serial.println("  FF <horas>     : Simular paso de N horas (ej: FF 5, FF 10, FF 12)");
-            Serial.println("  STIM <0..9> <V>: Estimular neurona con impulso gradual");
-            Serial.println("  THOUGHT <tipo> : Nudge a pensamiento (HEART, FOOD, NOSTALGIA...)");
-            Serial.println("  POPUP <tipo>   : Forzar popup (DEATH, UPDATE, NET)");
-            Serial.println("  AI <emocion>   : Disparar dialogo IA (HAPPY, SICK, DEAD...)");
-            Serial.println("  RESET          : Reiniciar partida");
-            Serial.println("  RESET_PLAYER   : Reiniciar perfil del jugador y forzar Onboarding");
-            Serial.println("  TUNECOLOURS   : Iniciar calibrador de color (Solo modo Debug)");
-            Serial.println("==================================================");
-        }
-        else if (cmd == "RESET_PLAYER") {
-            PlayerManager::getInstance().reset();
-            Serial.println("[KERNEL] Perfil de jugador eliminado. Reiniciando placa...");
-            delay(400);
-            ESP.restart();
-        }
-        else if (cmd == "EVOLVE") {
-            if (game) game->petEvolveNext();
-        }
-        else if (cmd.startsWith("STAGE ")) {
-            String s = cmd.substring(6); s.trim();
-            if (s == "EGG") game->petJumpStage(PetStage::Egg);
-            else if (s == "BABY") game->petJumpStage(PetStage::Baby);
-            else if (s == "CHILD") game->petJumpStage(PetStage::Child);
-            else if (s == "ADULT") game->petJumpStage(PetStage::Adult);
-            else if (s == "SENIOR") game->petJumpStage(PetStage::Senior);
-        }
-        else if (cmd == "ANIMS" || cmd == "TEST" || cmd == "SHOWCASE") {
-            if (game) game->startAnimationTest();
-        }
-        else if (cmd == "KILL" || cmd == "DIE") {
-            if (game) game->forcePetState(PetState::Dead);
-        }
-        else if (cmd == "REVIVE") {
-            if (game) game->petRevive();
-        }
-        else if (cmd == "GODMODE") {
-            if (game) game->petGodMode();
-        }
-        else if (cmd == "STARVE") {
-            if (game) game->petStarve();
-        }
-        else if (cmd == "BORED") {
-            if (game) game->petMakeBored();
-        }
-        else if (cmd == "HAPPY") {
-            if (game) game->petMakeHappy();
-        }
-        else if (cmd == "SICK") {
-            if (game) game->petMakeSick();
-        }
-        else if (cmd == "HEAL") {
-            if (game) game->petHeal();
-        }
-        else if (cmd == "POOP") {
-            if (game) game->petForcePoop();
-        }
-        else if (cmd == "POOPMAX") {
-            if (game) game->petMaxPoop();
-        }
-        else if (cmd == "CLEAN") {
-            if (game) game->petClean();
-        }
-        else if (cmd == "TIRED") {
-            if (game) game->petDrainEnergy();
-        }
-        else if (cmd == "FEED") {
-            if (game) game->petFeed();
-        }
-        else if (cmd == "PET") {
-            if (game) game->petPet();
-        }
-        else if (cmd == "LIGHTS") {
-            if (game) game->petToggleLights();
-        }
-        else if (cmd == "STATS" || cmd == "INFO") {
-            if (game) game->printStats();
-        }
-        else if (cmd == "PLAY" || cmd == "GAME") {
-            if (game) game->startMinigame();
-        }
-        else if (cmd == "RESET") {
-            if (game) game->resetGame();
-        }
-        else if (cmd == "DEBUG") {
-            SD_MMC.mkdir("/config");
-            if (SD_MMC.exists("/config/debug.txt")) {
-                SD_MMC.remove("/config/debug.txt");
-                Serial.println("[KERNEL] Debug desactivado en SD. Reiniciando...");
-            } else {
-                File f = SD_MMC.open("/config/debug.txt", "w");
-                if (f) { f.println("ON"); f.close(); }
-                Serial.println("[KERNEL] Debug activado en SD. Reiniciando...");
-            }
-            delay(500);
-            ESP.restart();
-        }
-        else if (cmd.startsWith("FF ")) {
-            float h = cmd.substring(3).toFloat();
-            if (game && h > 0.0f) game->petFastForward(h);
-        }
-        else if (cmd.startsWith("BRAIN ")) {
-            String bType = cmd.substring(6);
-            bType.trim();
-            if (game) game->setBrainArchetype(bType);
-        }
-        else if (cmd.startsWith("STIM ")) {
-            int firstSpace = cmd.indexOf(' ');
-            int secondSpace = cmd.indexOf(' ', firstSpace + 1);
-            if (firstSpace != -1 && secondSpace != -1) {
-                int nIdx = cmd.substring(firstSpace + 1, secondSpace).toInt();
-                float val = cmd.substring(secondSpace + 1).toFloat();
-                if (game) game->stimulateBrain(nIdx, val);
-                Serial.printf("[TEST] Estimulando neurona %d con impulso: %.2f\n", nIdx, val);
-            }
-        }
-        else if (cmd.startsWith("THOUGHT ")) {
-            String tStr = cmd.substring(8); tStr.trim();
-            ThoughtType tt = THOUGHT_HEART;
-            if (tStr == "FOOD") tt = THOUGHT_FOOD;
-            else if (tStr == "PLAY") tt = THOUGHT_PLAY;
-            else if (tStr == "SLEEP") tt = THOUGHT_SLEEP;
-            else if (tStr == "POOP") tt = THOUGHT_POOP;
-            else if (tStr == "MED") tt = THOUGHT_MED;
-            else if (tStr == "STRESS") tt = THOUGHT_STRESS;
-            else if (tStr == "CURIOUS") tt = THOUGHT_CURIOUS;
-            else if (tStr == "NOSTALGIA" || tStr == "DAYDREAM") tt = THOUGHT_NOSTALGIA;
-            else if (tStr == "ANTICIPATION" || tStr == "WAIT") tt = THOUGHT_ANTICIPATION;
-            else if (tStr == "CAPRICE" || tStr == "BOREDOM") tt = THOUGHT_CAPRICE;
-            else if (tStr == "NONE") tt = THOUGHT_NONE;
-            
-            if (game) game->nudgeThought(tt, "Estimulo incremental", 0.35f);
-            Serial.printf("[TEST] Nudge de pensamiento: %s (+acumulacion)\n", tStr.c_str());
-        }
-        else if (cmd.startsWith("POPUP ")) {
-            String pop = cmd.substring(6); pop.trim();
-            if (pop == "DEATH") {
-                currentState = STATE_POPUP_DEATH;
-                UIManager::drawDeathPopup(gfx);
-                popupLaunchTime = millis();
-            } else if (pop == "UPDATE") {
-                currentState = STATE_POPUP_UPDATE;
-                UIManager::drawUpdatePopup(gfx, "NUEVA VERSION", "v1.0.0");
-                popupLaunchTime = millis();
-            } else if (pop == "NET") {
-                currentState = STATE_POPUP;
-                UIManager::drawStardewPopup(gfx);
-                popupLaunchTime = millis();
-            }
-        }
-        else if (cmd.startsWith("AI ")) {
-            String mood = cmd.substring(3); mood.trim(); mood.toLowerCase();
-            MessageManager::getInstance().requestAiMessage(mood, "Comando manual forzado desde Serial");
-        }
-        else if (cmd.startsWith("STATE ")) {
-            String target = cmd.substring(6); target.trim();
-            if (target == "IDLE") game->forcePetState(PetState::Idle);
-            else if (target == "HAPPY") game->forcePetState(PetState::Happy);
-            else if (target == "EATING") game->forcePetState(PetState::Eating);
-            else if (target == "SLEEPING") game->forcePetState(PetState::Sleeping);
-            else if (target == "SICK") game->forcePetState(PetState::Sick);
-            else if (target == "SAD") game->forcePetState(PetState::Sad);
-            else if (target == "DEAD") game->forcePetState(PetState::Dead);
-        }
     }
 
     delay(20);

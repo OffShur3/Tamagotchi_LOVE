@@ -44,6 +44,11 @@ void Game::init() {
         SceneManager::getInstance().changeScene(nameSelectScene);
     });
 
+    // Cableado para abrir la Plaza Mii (ParkScene)
+    petScene->setOnOpenPlaza([this]() {
+        openParkScene();
+    });
+
     // Verificación de Primer Arranque (Onboarding)
     if (!PlayerManager::getInstance().hasProfile()) {
         Serial.println("[KERNEL] Sin perfil previo: Iniciando Onboarding en NameSelectScene...");
@@ -84,8 +89,11 @@ void Game::tick() {
 
     handleInput();
 
-    // Solo actualizar la mascota y el ciclo noche si no estamos en el selector de nombre
-    if (!nameSelectScene) {
+    // Solo la mascota activa en PetScene cambia de estado biológico; en Plaza o Selector queda en pausa
+    // Actualizar generación lenta de candidatos del orfanato en segundo plano
+    OrphanageManager::getInstance().update(dt);
+
+    if (!nameSelectScene && !parkScene) {
         pet.update(dt);
         renderer.setNightMode(!pet.isLightOn());
     } else {
@@ -110,3 +118,41 @@ void Game::resetGame() { pet.reset(); }
 void Game::redraw() {}
 void Game::printStats() const { pet.printStats(); }
 void Game::onTimeSynced() { pet.catchUpTime(); }
+
+void Game::openParkScene() {
+    pet.save(); // Guardar estado exacto de la mascota actual antes de ir a la Plaza
+    parkScene = std::make_shared<ParkScene>(
+        // 1. Callback al elegir "LLEVAR DE PASEO"
+        [this](const String& chosenPetId) {
+            Serial.printf("[PLAZA] Llevando de paseo a: %s\n", chosenPetId.c_str());
+            pet.save();
+            pet.loadById(chosenPetId);
+            if (petScene) petScene->forceTextureUpdate();
+            SceneManager::getInstance().changeScene(petScene);
+            parkScene = nullptr;
+        },
+        // 2. Callback al elegir "CAMBIAR NOMBRE" de un Tama en la Plaza
+        [this](const String& targetPetId, const String& curName) {
+            nameSelectScene = std::make_shared<NameSelectScene>([this, targetPetId]() {
+                String newName = PlayerManager::getInstance().getOwnerName();
+                // Si renombramos el Tama activo o uno de la plaza
+                Pet temp;
+                if (temp.loadById(targetPetId)) {
+                    temp.setPetName(newName);
+                }
+                if (pet.getPetId() == targetPetId) {
+                    pet.loadById(targetPetId);
+                }
+                nameSelectScene = nullptr;
+                openParkScene();
+            }, curName);
+            SceneManager::getInstance().changeScene(nameSelectScene);
+        },
+        // 3. Callback botón "< PASEO" (volver con la mascota actual)
+        [this]() {
+            SceneManager::getInstance().changeScene(petScene);
+            parkScene = nullptr;
+        }
+    );
+    SceneManager::getInstance().changeScene(parkScene);
+}

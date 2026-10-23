@@ -44,6 +44,9 @@ static void applyVisualDNA(uint8_t& r, uint8_t& g, uint8_t& b, uint32_t seed) {
 
 // Deduce el dominio de renderizado a partir del path del asset
 static ColorDomain deduceDomain(const std::string& path) {
+    if (path.find("Plaza") != std::string::npos || path.find("bg_plaza") != std::string::npos) {
+        return DOMAIN_PLAZA;
+    }
     if (path.find("sprites/base/") != std::string::npos) {
         return DOMAIN_TAMA;
     }
@@ -134,7 +137,8 @@ int32_t PNGReadCallback(PNGFILE *handle, uint8_t *buffer, int32_t length) {
 
 int32_t PNGSeekCallback(PNGFILE *handle, int32_t position) {
     fs::File* f = (fs::File*)handle->fHandle;
-    return f->seek(position);
+    if (!f) return -1;
+    return f->seek(position) ? position : -1;
 }
 
 std::shared_ptr<Texture> AssetManager::getTexture(const std::string& filepath) {
@@ -187,6 +191,7 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
     Serial.printf("[ASSETS] Abriendo archivo: %s\n", path.c_str());
     Serial.printf("[ASSETS] Dominio asignado: %s\n", getColorDomainName(deduceDomain(path)));
     Serial.printf("[ASSETS] Dimensiones:      %dx%d píxeles\n", tex->width, tex->height);
+    Serial.printf("[ASSETS] Peso en SD:       %u Bytes | Tipo: %d\n", (unsigned)pngFile.size(), png->getPixelType());
     Serial.printf("[ASSETS] Memoria requerida: %u Bytes (%u KB)\n", 
                   (unsigned)(colorBytes + alphaBytes), (unsigned)((colorBytes + alphaBytes) / 1024));
     Serial.printf("[ASSETS] Free PSRAM:       %u Bytes (%u KB)\n", 
@@ -221,7 +226,15 @@ std::shared_ptr<Texture> AssetManager::loadFromFile(const std::string& path) {
     pngFile.close();
 
     if (rc != PNG_SUCCESS) {
-        Serial.printf("[ASSETS] Error decodificando píxeles del PNG: %s\n", path.c_str());
+        const char* errStr = "UNKNOWN";
+        if (rc == 1) errStr = "PNG_INVALID_FILE";
+        else if (rc == 2) errStr = "PNG_TOO_BIG";
+        else if (rc == 3) errStr = "PNG_MEM_ERROR (Sin RAM interna suficiente)";
+        else if (rc == 4) errStr = "PNG_NO_BUFFER";
+        else if (rc == 5) errStr = "PNG_UNSUPPORTED_FEATURE (¿Guardado como Entrelazado/Interlaced o 16-bit?)";
+        else if (rc == 6) errStr = "PNG_INVALID_PARAMETER";
+        else if (rc == 7) errStr = "PNG_DECODE_ERROR (Stream corrupto o salto fallido)";
+        Serial.printf("[ASSETS] Error decodificando píxeles del PNG: %s -> %s (rc=%d)\n", path.c_str(), errStr, rc);
         return nullptr; 
     }
 

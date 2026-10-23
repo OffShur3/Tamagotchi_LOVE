@@ -95,8 +95,21 @@ public:
     }
 
     bool load();
+    bool loadById(const String& id);
     bool save();
     void reset();
+
+    String getPetId() const { return petId; }
+    void setPetId(const String& id) { petId = id; }
+    String getPetName() const { return petName; }
+    void setPetName(const String& n) { petName = n; save(); }
+    String getSaveFilePath() const { return "/config/pets/" + petId + ".json"; }
+
+    static void migrateLegacySaveIfNeeded();
+    static String getActivePetId();
+    static void setActivePetId(const String& id);
+    static std::vector<String> listSavedPetIds();
+    static String spawnNewPet(const String& speciesName = "tiernito", PetStage initialStage = PetStage::Baby, bool lowTrustOrphan = false);
 
     String getSpecies() const { return species; }
     std::vector<String> discoverInstalledSpecies();
@@ -115,9 +128,15 @@ public:
     uint32_t getDnaSeed() const { return dnaSeed; }
 
     String getSpritePath() const;
+    String getWalkSpritePath() const;
+    static String resolveSpritePathFor(const String& sp, PetStage st, const String& animName);
 
 private:
+    String petId = "pet_001";
+    String petName = "Tiernito #1";
     String species = "tiernito";
+    String accHat = "";
+    String accFace = "";
     PetStage stage = PetStage::Egg;
     PetState state = PetState::Idle;
     uint32_t dnaSeed = 0;

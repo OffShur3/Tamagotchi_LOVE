@@ -25,7 +25,8 @@ const domains = {
     "HUD":         { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
     "THOUGHT":     { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
     "POPUP_DAY":   { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
-    "POPUP_DREAM": { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 }
+    "POPUP_DREAM": { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 },
+    "PLAZA":       { deltaR:0, deltaG:0, deltaB:0, brightness:-40, contrast:-30, saturation:0 }
 };
 
 const colorOverrides = {};
@@ -274,7 +275,61 @@ function exitColorTuner() {
     switchInterfaceMode(false);
 }
 
-function saveToSD() { sendCommand("SAVE"); }
+let localConfigFileHandle = null;
+
+async function linkLocalConfigFile() {
+    try {
+        [localConfigFileHandle] = await window.showOpenFilePicker({
+            types: [{ description: 'Configuracion de Color', accept: { 'text/plain': ['.txt'] } }],
+            multiple: false
+        });
+        const btn = document.getElementById('btnLinkPC');
+        if (btn) {
+            btn.innerText = "✅ PC Vinculada (" + localConfigFileHandle.name + ")";
+            btn.style.color = "var(--accent-green)";
+        }
+        appendLog("[TUNER-PC] Archivo local vinculado: " + localConfigFileHandle.name);
+    } catch(err) {
+        console.log("Seleccion de archivo cancelada o no soportada.");
+    }
+}
+
+async function writeToLocalPCFile(rawContent) {
+    if (!localConfigFileHandle) return;
+    try {
+        const writable = await localConfigFileHandle.createWritable();
+        await writable.write(rawContent);
+        await writable.close();
+        appendLog("[TUNER-PC] ¡Archivo en tu PC actualizado con éxito!");
+    } catch(err) {
+        appendLog("[TUNER-PC] Error al escribir en disco local: " + err, "color: red;");
+    }
+}
+
+function buildCurrentRawConfigText() {
+    const g = domains["GLOBAL"] || { deltaR:0, deltaG:0, deltaB:0, brightness:40, contrast:30, saturation:0 };
+    let txt = `global:bgr=1;inv=0;swap=0;night=75;dr=${g.deltaR};dg=${g.deltaG};db=${g.deltaB};bri=${g.brightness};con=${g.contrast};sat=${g.saturation}\n`;
+    for (let d in domains) {
+        if (d === "GLOBAL") continue;
+        const p = domains[d];
+        txt += `${d}:dr=${p.deltaR};dg=${p.deltaG};db=${p.deltaB};bri=${p.brightness};con=${p.contrast};sat=${p.saturation};swapRB=0;inv=0\n`;
+    }
+    for (let c in colorOverrides) {
+        const p = colorOverrides[c];
+        txt += `${c}:dr=${p.deltaR};dg=${p.deltaG};db=${p.deltaB};bri=${p.brightness};con=${p.contrast};sat=${p.saturation};swapRB=0;inv=0\n`;
+    }
+    return txt;
+}
+
+async function saveToSD() {
+    sendCommand("SAVE");
+    if (localConfigFileHandle) {
+        const raw = buildCurrentRawConfigText();
+        await writeToLocalPCFile(raw);
+    } else {
+        appendLog("[TUNER] Guardado en SD. (Para guardar en tu PC, toca '📁 Vincular color_tuning.txt')");
+    }
+}
 function factoryResetSD() {
     if (confirm("¿Restaurar todos los perfiles de color a valores de fábrica?")) {
         for (let d in domains) domains[d] = { deltaR:0, deltaG:0, deltaB:0, brightness:0, contrast:0, saturation:0 };
@@ -596,6 +651,8 @@ function renderOriginalPreview() {
         assetUrl = "../sd_root/tama/ui/icons_ui.png";
     } else if (currentDomain === "THOUGHT") {
         assetUrl = "../sd_root/tama/ui/hunger_icon.png";
+    } else if (currentDomain === "PLAZA") {
+        assetUrl = "../sd_root/tama/ui/Plaza/bg_plaza.png";
     }
 
     if (assetUrl) {

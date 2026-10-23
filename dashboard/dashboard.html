@@ -131,6 +131,7 @@
                 <button class="domain-btn" onclick="switchDomain('THOUGHT')">💭 THOUGHT</button>
                 <button class="domain-btn" onclick="switchDomain('POPUP_DAY')">📜 DAY</button>
                 <button class="domain-btn" onclick="switchDomain('POPUP_DREAM')">🌙 DREAM</button>
+                <button class="domain-btn" onclick="switchDomain('PLAZA')">🏛️ PLAZA</button>
             </div>
 
             <div class="mode-selector-bar">
@@ -239,7 +240,8 @@
                     <input type="file" id="importFile" style="display:none" accept=".txt" onchange="importConfig(event)">
                     <button class="btn btn-blue" onclick="document.getElementById('importFile').click()">📥 IN</button>
                     <button class="btn btn-blue" onclick="exportConfig()">📤 OUT</button>
-                    <button class="btn btn-gold glow" onclick="saveToSD()">💾 Guardar en SD</button>
+                    <button id="btnLinkPC" class="btn btn-secondary btn-small" onclick="linkLocalConfigFile()">📁 Vincular color_tuning.txt (PC)</button>
+                    <button class="btn btn-gold glow" onclick="saveToSD()">💾 Guardar en SD / PC</button>
                 </div>
             </div>
         </div>

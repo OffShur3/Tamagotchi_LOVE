@@ -11,6 +11,9 @@ void PetScene::enter() {
     clockWidget = std::make_shared<ClockWidget>();
     addObject(clockWidget);
 
+    plazaWidget = std::make_shared<PlazaButtonWidget>();
+    addObject(plazaWidget);
+
     gearWidget = std::make_shared<GearButtonWidget>();
     addObject(gearWidget);
 
@@ -89,6 +92,7 @@ void PetScene::exit() {
     btnFood = btnMed = btnClean = btnLamp = nullptr;
     for (int i = 0; i < 3; i++) poopSprites[i] = nullptr;
     clockWidget = nullptr;
+    plazaWidget = nullptr;
     gearWidget = nullptr;
     statusHUD = nullptr;
     thoughtBubble = nullptr;
@@ -564,8 +568,16 @@ void PetScene::onTouch(uint16_t x, uint16_t y) {
         return;
     }
 
-    // 3. Toque en el botón engranaje de configuración: Hitbox x: [126, 168], y: [26, 54]
-    if (x >= 126 && x <= 168 && y >= 26 && y <= 54) {
+    // 3A. Toque en el botón de La Plaza Mii: Hitbox x: [114, 138], y: [26, 52]
+    if (x >= 114 && x <= 138 && y >= 26 && y <= 52) {
+        if (onOpenPlaza) {
+            onOpenPlaza();
+            return;
+        }
+    }
+
+    // 3B. Toque en el botón engranaje de configuración: Hitbox x: [139, 168], y: [26, 54]
+    if (x >= 139 && x <= 168 && y >= 26 && y <= 54) {
         if (configHelpModal) {
             configHelpModal->show("GUIA & AJUSTES");
             accumulatedStroke = 0.0f;

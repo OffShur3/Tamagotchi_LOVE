@@ -3,6 +3,7 @@
 #include "render/Renderer.h"
 #include "tamagotchi/Pet.h"
 #include "tamagotchi/PetScene.h"
+#include "tamagotchi/ParkScene.h"
 #include "tamagotchi/NameSelectScene.h"
 #include <Arduino_GFX_Library.h>
 #include <memory>
@@ -68,8 +69,11 @@ private:
     Renderer renderer;
     uint32_t lastFrameTime;
 
+    void openParkScene();
+
     Pet pet;
     std::shared_ptr<PetScene> petScene = nullptr;
+    std::shared_ptr<ParkScene> parkScene = nullptr;
     std::shared_ptr<NameSelectScene> nameSelectScene = nullptr;
 
     void handleInput();

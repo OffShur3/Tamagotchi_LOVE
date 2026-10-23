@@ -11,6 +11,7 @@ enum ColorDomain : uint8_t {
     DOMAIN_THOUGHT,
     DOMAIN_POPUP_DAY,
     DOMAIN_POPUP_DREAM,
+    DOMAIN_PLAZA,
     DOMAIN_COUNT
 };
 
@@ -62,3 +63,8 @@ void factoryResetColorSD(Arduino_DataBus* bus = nullptr);
 String getRawConfigString();
 void setRawConfigString(const String& raw);
 String serializeProfilesJson();
+bool handleColorTunerCommand(const String& cmd, Arduino_DataBus* bus = nullptr);
+
+bool isColorTunerActive();
+void setColorTunerActive(bool active);
+void renderColorTunerScreen(uint16_t* fb, uint16_t width, uint16_t height, Arduino_GFX* gfx);
